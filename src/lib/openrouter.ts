@@ -13,6 +13,20 @@ type SendOpenRouterChatInput = {
   onMessageId?: (id: string) => void
 }
 
+export type ProviderUsage = {
+  provider: string
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  reasoningTokens?: number
+  cachedTokens?: number
+  costCredits?: number
+  contextWindowTokens?: number
+  remainingTokens?: number
+  recordedAt: number
+  raw?: unknown
+}
+
 type OpenRouterStreamChoice = {
   delta?: { content?: unknown }
   message?: { content?: unknown }
@@ -21,6 +35,42 @@ type OpenRouterStreamChoice = {
 type OpenRouterStreamPayload = {
   id?: string
   choices?: OpenRouterStreamChoice[]
+  usage?: unknown
+}
+
+function numberValue(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function objectValue(value: unknown) {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined
+}
+
+function normalizeUsage(usage: unknown): ProviderUsage | undefined {
+  const data = objectValue(usage)
+  if (!data) {
+    return undefined
+  }
+
+  const promptDetails = objectValue(data.prompt_tokens_details)
+  const completionDetails = objectValue(data.completion_tokens_details)
+  const normalized: ProviderUsage = {
+    provider: 'openrouter',
+    promptTokens: numberValue(data.prompt_tokens),
+    completionTokens: numberValue(data.completion_tokens),
+    totalTokens: numberValue(data.total_tokens),
+    reasoningTokens: numberValue(completionDetails?.reasoning_tokens),
+    cachedTokens: numberValue(promptDetails?.cached_tokens),
+    costCredits: numberValue(data.cost),
+    contextWindowTokens: numberValue(data.context_window_tokens),
+    remainingTokens: numberValue(data.remaining_tokens),
+    recordedAt: Date.now(),
+    raw: usage,
+  }
+
+  return Object.values(normalized).some((value) => typeof value === 'number')
+    ? normalized
+    : undefined
 }
 
 function toTextContent(content: unknown) {
@@ -104,6 +154,7 @@ export async function sendOpenRouterChat({
   let buffer = ''
   let fullText = ''
   let requestId = ''
+  let usage: ProviderUsage | undefined
 
   while (true) {
     const { done, value } = await reader.read()
@@ -131,7 +182,7 @@ export async function sendOpenRouterChat({
 
       const data = dataLines.join('\n')
       if (data === '[DONE]') {
-        return { content: fullText, id: requestId }
+        return { content: fullText, id: requestId, usage }
       }
 
       let payload: OpenRouterStreamPayload
@@ -146,6 +197,8 @@ export async function sendOpenRouterChat({
         onMessageId?.(requestId)
       }
 
+      usage = normalizeUsage(payload.usage) ?? usage
+
       const choice = payload.choices?.[0]
       const content =
         toTextContent(choice?.delta?.content) || toTextContent(choice?.message?.content)
@@ -157,5 +210,5 @@ export async function sendOpenRouterChat({
     }
   }
 
-  return { content: fullText, id: requestId }
+  return { content: fullText, id: requestId, usage }
 }

@@ -28,6 +28,20 @@ export interface ConversationThread {
   updatedAt: number
 }
 
+export interface ProviderUsage {
+  provider: string
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  reasoningTokens?: number
+  cachedTokens?: number
+  costCredits?: number
+  contextWindowTokens?: number
+  remainingTokens?: number
+  recordedAt: number
+  raw?: unknown
+}
+
 export interface ChatMessage {
   id: string
   conversationType: ConversationType
@@ -40,6 +54,7 @@ export interface ChatMessage {
   directReplyCount: number
   model?: string
   providerRequestId?: string
+  providerUsage?: ProviderUsage
   error?: string
 }
 
@@ -342,17 +357,27 @@ export async function updateMessage(
   updates: Partial<
     Pick<
       ChatMessage,
-      'content' | 'providerRequestId' | 'status' | 'error' | 'directReplyCount'
+      | 'content'
+      | 'providerRequestId'
+      | 'providerUsage'
+      | 'status'
+      | 'error'
+      | 'directReplyCount'
     >
   >,
 ) {
   await db.messages.update(messageId, updates)
 }
 
-export async function completeMessage(messageId: string, content: string) {
+export async function completeMessage(
+  messageId: string,
+  content: string,
+  providerUsage?: ProviderUsage,
+) {
   await db.messages.update(messageId, {
     content,
     error: undefined,
+    ...(providerUsage ? { providerUsage } : {}),
     status: 'complete',
   })
 }

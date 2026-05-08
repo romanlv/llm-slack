@@ -4,6 +4,9 @@ import { Link, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 import {
   Archive,
   ArchiveRestore,
+  Bookmark,
+  GitBranch,
+  Hash,
   KeyRound,
   MessageSquarePlus,
   Search,
@@ -12,14 +15,15 @@ import {
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card } from '@/components/ui/card'
 import {
   archiveParentChat,
   createParentChat,
   db,
   ensureSeedParentChat,
-  getSettings,
+  previewText,
   restoreParentChat,
+  type ChatMessage,
+  type ConversationThread,
   type ParentChat,
 } from '@/lib/db'
 import { cn } from '@/lib/utils'
@@ -40,18 +44,122 @@ function matchesSearch(parentChat: ParentChat, query: string) {
   return haystack.includes(query)
 }
 
+function parseChatPath(pathname: string) {
+  const match = pathname.match(/^\/chat\/([^/]+)(?:\/thread\/([^/]+))?/)
+
+  return {
+    activeChatId: match?.[1],
+    activeThreadId: match?.[2],
+  }
+}
+
+function branchTitle(rootMessage?: ChatMessage) {
+  if (!rootMessage) {
+    return 'Untitled branch'
+  }
+
+  const text = previewText(rootMessage.content)
+  return text.length > 32 ? `${text.slice(0, 29)}...` : text || 'Untitled branch'
+}
+
+function BranchTreeNode({
+  activeThreadId,
+  depth,
+  messagesById,
+  parentChatId,
+  thread,
+  threadsByParent,
+}: {
+  activeThreadId?: string
+  depth: number
+  messagesById: Map<string, ChatMessage>
+  parentChatId: string
+  thread: ConversationThread
+  threadsByParent: Map<string, ConversationThread[]>
+}) {
+  const children = threadsByParent.get(thread.id) ?? []
+  const active = thread.id === activeThreadId
+  const rootMessage = messagesById.get(thread.rootMessageId)
+  const title = branchTitle(rootMessage)
+
+  return (
+    <>
+      <Link
+        className={cn(
+          'group relative flex items-center gap-2 px-3 py-1.5 text-sm transition',
+          active
+            ? 'bg-[#1164a3] font-semibold text-white'
+            : 'text-[#d1c7d3] hover:bg-white/8 hover:text-white',
+        )}
+        params={{ chatId: parentChatId, threadId: thread.id }}
+        style={{ paddingLeft: `${18 + depth * 18}px` }}
+        to="/chat/$chatId/thread/$threadId"
+      >
+        {depth > 0 ? (
+          <>
+            <span
+              className="absolute bottom-1/2 top-0 w-px bg-white/12"
+              style={{ left: `${16 + (depth - 1) * 18}px` }}
+            />
+            <span
+              className="absolute top-1/2 h-px w-3 bg-white/12"
+              style={{ left: `${16 + (depth - 1) * 18}px` }}
+            />
+          </>
+        ) : null}
+        <GitBranch className={cn('size-3.5 shrink-0', active ? 'text-white' : 'text-[#d8a7da]')} />
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <span className={cn('font-mono text-[10px]', active ? 'text-white/80' : 'text-white/45')}>
+          {rootMessage?.directReplyCount || 'new'}
+        </span>
+      </Link>
+      {children.map((child) => (
+        <BranchTreeNode
+          activeThreadId={activeThreadId}
+          depth={depth + 1}
+          key={child.id}
+          messagesById={messagesById}
+          parentChatId={parentChatId}
+          thread={child}
+          threadsByParent={threadsByParent}
+        />
+      ))}
+    </>
+  )
+}
+
 export function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
   const [search, setSearch] = useState('')
   const [showArchived, setShowArchived] = useState(false)
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
+  const { activeChatId, activeThreadId } = parseChatPath(location.pathname)
 
-  const settings = useLiveQuery(() => getSettings(), [], undefined)
+  const settings = useLiveQuery(() => db.settings.get('app'), [], undefined)
   const parentChats = useLiveQuery(
     () => db.parentChats.orderBy('updatedAt').reverse().toArray(),
     [],
     [],
+  )
+  const activeThreads = useLiveQuery(
+    () =>
+      activeChatId
+        ? db.threads.where('parentChatId').equals(activeChatId).sortBy('createdAt')
+        : Promise.resolve([] as ConversationThread[]),
+    [activeChatId],
+    [] as ConversationThread[],
+  )
+  const branchRootMessages = useLiveQuery(
+    async () => {
+      if (activeThreads.length === 0) {
+        return []
+      }
+
+      return db.messages.bulkGet(activeThreads.map((thread) => thread.rootMessageId))
+    },
+    [activeThreads],
+    [] as Array<ChatMessage | undefined>,
   )
 
   useEffect(() => {
@@ -71,203 +179,231 @@ export function AppShell() {
   )
   const activeParentChats = visibleParentChats.filter((chat) => !chat.archivedAt)
   const archivedParentChats = visibleParentChats.filter((chat) => Boolean(chat.archivedAt))
+  const activeParentChat = activeChatId
+    ? parentChats.find((chat) => chat.id === activeChatId)
+    : undefined
+  const messagesById = new Map(
+    branchRootMessages
+      .filter((message): message is ChatMessage => Boolean(message))
+      .map((message) => [message.id, message]),
+  )
+  const rootThreads = activeThreads.filter((thread) => !thread.parentThreadId)
+  const threadsByParent = activeThreads.reduce(
+    (map, thread) => {
+      if (!thread.parentThreadId) {
+        return map
+      }
+
+      const siblings = map.get(thread.parentThreadId) ?? []
+      siblings.push(thread)
+      map.set(thread.parentThreadId, siblings)
+      return map
+    },
+    new Map<string, ConversationThread[]>(),
+  )
 
   return (
-    <div className="min-h-screen p-4 md:p-6">
-      <div className="mx-auto grid h-[calc(100vh-2rem)] max-w-[1600px] gap-4 md:h-[calc(100vh-3rem)] lg:grid-cols-[340px_minmax(0,1fr)]">
-        <Card className="flex flex-col overflow-hidden">
-          <div className="border-b border-border p-5">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-                  Deepchat
-                </p>
-                <h1 className="mt-2 text-2xl font-semibold tracking-tight">
-                  Parent chats
-                </h1>
+    <div className="h-screen overflow-hidden bg-[#f8f8f8] text-[#1d1c1d]">
+      <div className="grid h-full min-h-0 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <aside className="hidden min-h-0 flex-col overflow-hidden bg-[#3f0e40] text-[#d1c7d3] lg:flex">
+          <div className="border-b border-white/10 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-[#ecb22e] to-[#e01e5a] font-mono text-sm font-black text-[#3f0e40]">
+                A
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-base font-bold text-white">Arcadia Labs</div>
+                <div className="mt-0.5 flex items-center gap-1.5 text-xs text-white/55">
+                  <span className="size-2 rounded-full bg-[#2bac76]" />
+                  Mira Chen
+                </div>
               </div>
               <Link
-                className="rounded-full border border-border p-2 text-muted-foreground transition hover:bg-white"
+                className="rounded-md p-1.5 text-white/55 transition hover:bg-white/10 hover:text-white"
                 to="/settings"
               >
                 <Settings2 className="size-4" />
               </Link>
             </div>
 
-            <div className="mb-3 flex items-center gap-2 rounded-2xl border border-input bg-white/70 px-3">
-              <Search className="size-4 text-muted-foreground" />
+            <div className="mt-4 flex items-center gap-2 rounded-md bg-black/25 px-3 py-2 text-sm text-white/55">
+              <Search className="size-4" />
               <Input
-                className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+                className="h-6 border-0 bg-transparent p-0 font-mono text-sm text-white shadow-none placeholder:text-white/45 focus-visible:ring-0"
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search parent chats"
+                placeholder="search or run /command"
                 value={search}
               />
+              <span className="rounded border border-white/10 px-1.5 py-0.5 font-mono text-[10px]">
+                ⌘K
+              </span>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto py-3">
+            <div className="px-2">
+              <button className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-semibold text-white transition hover:bg-white/8">
+                <Bookmark className="size-4" />
+                <span className="flex-1">Saved for later</span>
+                <span className="font-mono text-xs text-white/45">private</span>
+                <span className="rounded bg-white/10 px-1.5 font-mono text-xs text-[#d8a7da]">3</span>
+              </button>
             </div>
 
-            <div className="mb-4 flex items-center justify-between gap-3">
+            <section className="mt-5">
+              <div className="mb-1 px-4 font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-white/55">
+                Pinned
+              </div>
+              {activeParentChats.slice(0, 4).map((parentChat) => {
+                const active =
+                  location.pathname === `/chat/${parentChat.id}` ||
+                  location.pathname.startsWith(`/chat/${parentChat.id}/thread/`)
+
+                return (
+                  <Link
+                    className={cn(
+                      'flex items-center gap-2 px-4 py-1.5 text-sm transition',
+                      active
+                        ? 'bg-[#1164a3] font-semibold text-white'
+                        : 'text-[#d1c7d3] hover:bg-white/8 hover:text-white',
+                    )}
+                    key={parentChat.id}
+                    params={{ chatId: parentChat.id }}
+                    to="/chat/$chatId"
+                  >
+                    <Hash className="size-3.5 shrink-0 text-white/45" />
+                    <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
+                    <span className="font-mono text-[10px] text-[#d8a7da]">
+                      {formatUpdatedAt(parentChat.updatedAt)}
+                    </span>
+                  </Link>
+                )
+              })}
+            </section>
+
+            {activeParentChat ? (
+              <section className="mt-5">
+                <div className="mb-1 flex items-center justify-between px-4">
+                  <span className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-white/55">
+                    Branches
+                  </span>
+                  <span className="font-mono text-[10px] text-white/45">map ↗</span>
+                </div>
+                <Link
+                  className={cn(
+                    'flex items-center gap-2 px-4 py-1.5 text-sm transition',
+                    activeChatId && !activeThreadId
+                      ? 'bg-[#1164a3] font-semibold text-white'
+                      : 'text-[#d1c7d3] hover:bg-white/8 hover:text-white',
+                  )}
+                  params={{ chatId: activeParentChat.id }}
+                  to="/chat/$chatId"
+                >
+                  <span className="size-2 rounded-full bg-[#2bac76]" />
+                  <span className="min-w-0 flex-1 truncate">{activeParentChat.title}</span>
+                  <span className="font-mono text-[10px] text-white/45">
+                    {rootThreads.length} br
+                  </span>
+                </Link>
+                {rootThreads.length === 0 ? (
+                  <div className="px-4 py-2 text-xs leading-5 text-white/45">
+                    Hover a message and branch to populate this tree.
+                  </div>
+                ) : (
+                  rootThreads.map((thread) => (
+                    <BranchTreeNode
+                      activeThreadId={activeThreadId}
+                      depth={1}
+                      key={thread.id}
+                      messagesById={messagesById}
+                      parentChatId={activeParentChat.id}
+                      thread={thread}
+                      threadsByParent={threadsByParent}
+                    />
+                  ))
+                )}
+              </section>
+            ) : null}
+
+            <section className="mt-5">
+              <div className="mb-1 px-4 font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-white/55">
+                Recent
+              </div>
+              {activeParentChats.slice(4).map((parentChat) => (
+                <div className="group flex items-center gap-2 px-4 py-1.5 text-sm text-[#d1c7d3]" key={parentChat.id}>
+                  <Link
+                    className="min-w-0 flex-1 truncate transition hover:text-white"
+                    params={{ chatId: parentChat.id }}
+                    to="/chat/$chatId"
+                  >
+                    # {parentChat.title}
+                  </Link>
+                  <button
+                    className="opacity-0 transition hover:text-white group-hover:opacity-100"
+                    onClick={() => void archiveParentChat(parentChat.id)}
+                    type="button"
+                  >
+                    <Archive className="size-3.5" />
+                  </button>
+                </div>
+              ))}
+            </section>
+
+            {showArchived ? (
+              <section className="mt-5">
+                <div className="mb-1 px-4 font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-white/55">
+                  Archived
+                </div>
+                {archivedParentChats.length === 0 ? (
+                  <div className="px-4 py-2 text-xs text-white/45">No archived chats.</div>
+                ) : (
+                  archivedParentChats.map((parentChat) => (
+                    <button
+                      className="flex w-full items-center gap-2 px-4 py-1.5 text-left text-sm text-white/65 transition hover:bg-white/8 hover:text-white"
+                      key={parentChat.id}
+                      onClick={() => void restoreParentChat(parentChat.id)}
+                      type="button"
+                    >
+                      <ArchiveRestore className="size-3.5" />
+                      <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
+                    </button>
+                  ))
+                )}
+              </section>
+            ) : null}
+          </div>
+
+          <div className="border-t border-white/10 p-3">
+            <div
+              className={cn(
+                'mb-3 inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium',
+                settings?.openRouterApiKey
+                  ? 'bg-emerald-400/15 text-emerald-200'
+                  : 'bg-amber-400/15 text-amber-200',
+              )}
+            >
+              <KeyRound className="size-3" />
+              {settings?.openRouterApiKey ? 'OpenRouter ready' : 'Add API key'}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button className="h-9 justify-center rounded bg-white/10 text-white hover:bg-white/15" onClick={handleNewParentChat}>
+                <MessageSquarePlus className="size-4" />
+                New
+              </Button>
               <button
-                className="text-xs font-medium text-muted-foreground transition hover:text-foreground"
+                className="rounded border border-white/10 px-3 text-xs font-medium text-white/65 transition hover:bg-white/8 hover:text-white"
                 onClick={() => setShowArchived((value) => !value)}
                 type="button"
               >
-                {showArchived ? 'Hide archived' : 'Show archived'}
+                {showArchived ? 'Hide archived' : 'Archived'}
               </button>
-
-              <div
-                className={cn(
-                  'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium',
-                  settings?.openRouterApiKey
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : 'bg-amber-100 text-amber-800',
-                )}
-              >
-                <KeyRound className="size-3" />
-                {settings?.openRouterApiKey ? 'OpenRouter ready' : 'Add API key'}
-              </div>
-            </div>
-
-            <Button className="w-full justify-center" onClick={handleNewParentChat}>
-              <MessageSquarePlus className="size-4" />
-              New parent chat
-            </Button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-3">
-            <div className="space-y-5">
-              <section>
-                <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                  Active
-                </div>
-
-                <div className="space-y-2">
-                  {activeParentChats.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-                      {parentChats.length === 0
-                        ? 'Creating your first parent chat...'
-                        : 'No parent chats match this search.'}
-                    </div>
-                  ) : (
-                    activeParentChats.map((parentChat) => {
-                      const active =
-                        location.pathname === `/chat/${parentChat.id}` ||
-                        location.pathname.startsWith(`/chat/${parentChat.id}/thread/`)
-
-                      return (
-                        <div
-                          className={cn(
-                            'group rounded-2xl border transition',
-                            active
-                              ? 'border-primary bg-primary text-primary-foreground'
-                              : 'border-transparent bg-white/55 hover:border-border hover:bg-white',
-                          )}
-                          key={parentChat.id}
-                        >
-                          <Link
-                            className="block px-4 py-3"
-                            params={{ chatId: parentChat.id }}
-                            to="/chat/$chatId"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-medium">{parentChat.title}</p>
-                                <p
-                                  className={cn(
-                                    'mt-1 line-clamp-2 text-xs',
-                                    active
-                                      ? 'text-primary-foreground/75'
-                                      : 'text-muted-foreground',
-                                  )}
-                                >
-                                  {parentChat.lastActivityPreview}
-                                </p>
-                              </div>
-                              <span
-                                className={cn(
-                                  'shrink-0 text-[11px]',
-                                  active
-                                    ? 'text-primary-foreground/75'
-                                    : 'text-muted-foreground',
-                                )}
-                              >
-                                {formatUpdatedAt(parentChat.updatedAt)}
-                              </span>
-                            </div>
-                          </Link>
-
-                          <div className="flex justify-end px-3 pb-3">
-                            <button
-                              className={cn(
-                                'inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] transition',
-                                active
-                                  ? 'text-primary-foreground/80 hover:bg-white/12'
-                                  : 'text-muted-foreground hover:bg-secondary',
-                              )}
-                              onClick={() => void archiveParentChat(parentChat.id)}
-                              type="button"
-                            >
-                              <Archive className="size-3.5" />
-                              Archive
-                            </button>
-                          </div>
-                        </div>
-                      )
-                    })
-                  )}
-                </div>
-              </section>
-
-              {showArchived ? (
-                <section>
-                  <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Archived
-                  </div>
-
-                  <div className="space-y-2">
-                    {archivedParentChats.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-                        No archived parent chats yet.
-                      </div>
-                    ) : (
-                      archivedParentChats.map((parentChat) => (
-                        <div
-                          className="rounded-2xl border border-border bg-white/45 px-4 py-3"
-                          key={parentChat.id}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <Link
-                              className="min-w-0 flex-1"
-                              params={{ chatId: parentChat.id }}
-                              to="/chat/$chatId"
-                            >
-                              <p className="truncate text-sm font-medium text-foreground">
-                                {parentChat.title}
-                              </p>
-                              <p className="mt-1 truncate text-xs text-muted-foreground">
-                                {parentChat.lastActivityPreview}
-                              </p>
-                            </Link>
-                            <button
-                              className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-secondary"
-                              onClick={() => void restoreParentChat(parentChat.id)}
-                              type="button"
-                            >
-                              <ArchiveRestore className="size-3.5" />
-                              Restore
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </section>
-              ) : null}
             </div>
           </div>
-        </Card>
+        </aside>
 
-        <Card className="min-h-0 overflow-y-auto">
+        <main className="min-h-0 min-w-0 overflow-hidden bg-white shadow-[inset_1px_0_0_rgba(10,20,40,0.09)]">
           <Outlet />
-        </Card>
+        </main>
       </div>
     </div>
   )

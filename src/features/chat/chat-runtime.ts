@@ -88,7 +88,7 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
     })
 
     const finalContent = response.content.trim() || 'The provider returned an empty response.'
-    await completeMessage(assistantMessage.id, finalContent)
+    await completeMessage(assistantMessage.id, finalContent, response.usage)
     if (response.id) {
       await updateMessage(assistantMessage.id, { providerRequestId: response.id })
     }
@@ -163,7 +163,7 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     })
 
     const finalContent = response.content.trim() || 'The provider returned an empty response.'
-    await completeMessage(assistantMessage.id, finalContent)
+    await completeMessage(assistantMessage.id, finalContent, response.usage)
     if (response.id) {
       await updateMessage(assistantMessage.id, { providerRequestId: response.id })
     }
