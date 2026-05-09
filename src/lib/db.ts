@@ -58,12 +58,33 @@ export interface ChatMessage {
   error?: string
 }
 
+export type AppTheme = 'aubergine' | 'midnight' | 'paper'
+
+export const APP_THEMES: ReadonlyArray<{ id: AppTheme; label: string; description: string }> = [
+  {
+    id: 'aubergine',
+    label: 'Aubergine',
+    description: 'Default Slack-flavored palette · deep plum sidebar, green send.',
+  },
+  {
+    id: 'midnight',
+    label: 'Midnight',
+    description: 'Dark mode · low-light surfaces with indigo accents.',
+  },
+  {
+    id: 'paper',
+    label: 'Paper',
+    description: 'Warm off-white workspace · orange accent.',
+  },
+]
+
 export interface AppSettings {
   id: 'app'
   openRouterApiKey: string
   defaultModel: string
   siteUrl: string
   siteName: string
+  theme: AppTheme
 }
 
 export interface ThreadAncestor {
@@ -79,6 +100,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultModel: DEFAULT_MODEL,
   siteUrl: typeof window !== 'undefined' ? window.location.origin : '',
   siteName: 'Deepchat',
+  theme: 'aubergine',
 }
 
 class DeepchatDatabase extends Dexie {
@@ -114,7 +136,7 @@ function titleFromPrompt(content: string) {
 export async function getSettings() {
   const existing = await db.settings.get('app')
   if (existing) {
-    return existing
+    return { ...DEFAULT_SETTINGS, ...existing }
   }
 
   await db.settings.put(DEFAULT_SETTINGS)

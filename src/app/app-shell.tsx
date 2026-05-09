@@ -86,10 +86,10 @@ function BranchTreeNode({
     <>
       <Link
         className={cn(
-          'group relative flex items-center gap-2 px-3 py-1.5 text-sm transition',
+          'group relative flex items-center gap-2 px-3 py-1.5 text-tab transition',
           active
-            ? 'bg-[#1164a3] font-semibold text-white'
-            : 'text-[#d1c7d3] hover:bg-white/8 hover:text-white',
+            ? 'bg-sidebar-active font-semibold text-white'
+            : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
         )}
         params={{ chatId: parentChatId, threadId: thread.id }}
         style={{ paddingLeft: `${18 + depth * 18}px` }}
@@ -98,18 +98,18 @@ function BranchTreeNode({
         {depth > 0 ? (
           <>
             <span
-              className="absolute bottom-1/2 top-0 w-px bg-white/12"
+              className="absolute bottom-1/2 top-0 w-px bg-sidebar-line"
               style={{ left: `${16 + (depth - 1) * 18}px` }}
             />
             <span
-              className="absolute top-1/2 h-px w-3 bg-white/12"
+              className="absolute top-1/2 h-px w-3 bg-sidebar-line"
               style={{ left: `${16 + (depth - 1) * 18}px` }}
             />
           </>
         ) : null}
-        <GitBranch className={cn('size-3.5 shrink-0', active ? 'text-white' : 'text-[#d8a7da]')} />
+        <GitBranch className={cn('size-3.5 shrink-0', active ? 'text-white' : 'text-sidebar-chip')} />
         <span className="min-w-0 flex-1 truncate">{title}</span>
-        <span className={cn('font-mono text-[10px]', active ? 'text-white/80' : 'text-white/45')}>
+        <span className={cn('font-mono text-meta', active ? 'text-white/80' : 'text-sidebar-fg-dim')}>
           {rootMessage?.directReplyCount || 'new'}
         </span>
       </Link>
@@ -166,6 +166,11 @@ export function AppShell() {
     void ensureSeedParentChat()
   }, [])
 
+  useEffect(() => {
+    const theme = settings?.theme ?? 'aubergine'
+    document.documentElement.dataset.theme = theme
+  }, [settings?.theme])
+
   const handleNewParentChat = async () => {
     const parentChat = await createParentChat()
     await navigate({
@@ -203,38 +208,38 @@ export function AppShell() {
   )
 
   return (
-    <div className="h-screen overflow-hidden bg-[#f8f8f8] text-[#1d1c1d]">
+    <div className="h-screen overflow-hidden bg-canvas text-ink">
       <div className="grid h-full min-h-0 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <aside className="hidden min-h-0 flex-col overflow-hidden bg-[#3f0e40] text-[#d1c7d3] lg:flex">
-          <div className="border-b border-white/10 px-4 py-3">
+        <aside className="hidden min-h-0 flex-col overflow-hidden bg-sidebar text-sidebar-fg lg:flex">
+          <div className="border-b border-sidebar-line px-4 py-3">
             <div className="flex items-center gap-3">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-[#ecb22e] to-[#e01e5a] font-mono text-sm font-black text-[#3f0e40]">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-yellow to-pink font-mono text-sm font-black text-sidebar">
                 A
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-base font-bold text-white">Arcadia Labs</div>
-                <div className="mt-0.5 flex items-center gap-1.5 text-xs text-white/55">
-                  <span className="size-2 rounded-full bg-[#2bac76]" />
+                <div className="truncate text-title font-bold tracking-tight text-white">Arcadia Labs</div>
+                <div className="mt-0.5 flex items-center gap-1.5 text-pill text-sidebar-fg-muted">
+                  <span className="size-2 rounded-full bg-online" />
                   Mira Chen
                 </div>
               </div>
               <Link
-                className="rounded-md p-1.5 text-white/55 transition hover:bg-white/10 hover:text-white"
+                className="rounded-md p-1.5 text-sidebar-fg-muted transition hover:bg-sidebar-hover hover:text-white"
                 to="/settings"
               >
                 <Settings2 className="size-4" />
               </Link>
             </div>
 
-            <div className="mt-4 flex items-center gap-2 rounded-md bg-black/25 px-3 py-2 text-sm text-white/55">
+            <div className="mt-4 flex items-center gap-2 rounded-md bg-black/25 px-3 py-2 text-tab text-sidebar-fg-muted">
               <Search className="size-4" />
               <Input
-                className="h-6 border-0 bg-transparent p-0 font-mono text-sm text-white shadow-none placeholder:text-white/45 focus-visible:ring-0"
+                className="h-6 border-0 bg-transparent p-0 font-mono text-tab text-white shadow-none placeholder:text-sidebar-fg-dim focus-visible:ring-0"
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="search or run /command"
                 value={search}
               />
-              <span className="rounded border border-white/10 px-1.5 py-0.5 font-mono text-[10px]">
+              <span className="rounded border border-sidebar-line px-1.5 py-0.5 font-mono text-meta">
                 ⌘K
               </span>
             </div>
@@ -242,16 +247,16 @@ export function AppShell() {
 
           <div className="min-h-0 flex-1 overflow-y-auto py-3">
             <div className="px-2">
-              <button className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-semibold text-white transition hover:bg-white/8">
+              <button className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-body font-medium text-white transition hover:bg-sidebar-hover">
                 <Bookmark className="size-4" />
                 <span className="flex-1">Saved for later</span>
-                <span className="font-mono text-xs text-white/45">private</span>
-                <span className="rounded bg-white/10 px-1.5 font-mono text-xs text-[#d8a7da]">3</span>
+                <span className="font-mono text-meta text-sidebar-fg-dim">private</span>
+                <span className="rounded bg-white/10 px-1.5 font-mono text-meta font-semibold text-sidebar-chip">3</span>
               </button>
             </div>
 
             <section className="mt-5">
-              <div className="mb-1 px-4 font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-white/55">
+              <div className="mb-1 px-4 font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
                 Pinned
               </div>
               {activeParentChats.slice(0, 4).map((parentChat) => {
@@ -262,18 +267,18 @@ export function AppShell() {
                 return (
                   <Link
                     className={cn(
-                      'flex items-center gap-2 px-4 py-1.5 text-sm transition',
+                      'flex items-center gap-2 px-4 py-1 text-body transition',
                       active
-                        ? 'bg-[#1164a3] font-semibold text-white'
-                        : 'text-[#d1c7d3] hover:bg-white/8 hover:text-white',
+                        ? 'bg-sidebar-active font-semibold text-white'
+                        : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
                     )}
                     key={parentChat.id}
                     params={{ chatId: parentChat.id }}
                     to="/chat/$chatId"
                   >
-                    <Hash className="size-3.5 shrink-0 text-white/45" />
+                    <Hash className="size-3.5 shrink-0 text-sidebar-fg-dim" />
                     <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
-                    <span className="font-mono text-[10px] text-[#d8a7da]">
+                    <span className="font-mono text-meta text-sidebar-chip">
                       {formatUpdatedAt(parentChat.updatedAt)}
                     </span>
                   </Link>
@@ -284,29 +289,29 @@ export function AppShell() {
             {activeParentChat ? (
               <section className="mt-5">
                 <div className="mb-1 flex items-center justify-between px-4">
-                  <span className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-white/55">
+                  <span className="font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
                     Branches
                   </span>
-                  <span className="font-mono text-[10px] text-white/45">map ↗</span>
+                  <span className="font-mono text-meta text-sidebar-fg-dim">map ↗</span>
                 </div>
                 <Link
                   className={cn(
-                    'flex items-center gap-2 px-4 py-1.5 text-sm transition',
+                    'flex items-center gap-2 px-4 py-1 text-body transition',
                     activeChatId && !activeThreadId
-                      ? 'bg-[#1164a3] font-semibold text-white'
-                      : 'text-[#d1c7d3] hover:bg-white/8 hover:text-white',
+                      ? 'bg-sidebar-active font-semibold text-white'
+                      : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
                   )}
                   params={{ chatId: activeParentChat.id }}
                   to="/chat/$chatId"
                 >
-                  <span className="size-2 rounded-full bg-[#2bac76]" />
+                  <span className="size-2 rounded-full bg-online" />
                   <span className="min-w-0 flex-1 truncate">{activeParentChat.title}</span>
-                  <span className="font-mono text-[10px] text-white/45">
+                  <span className="font-mono text-meta text-sidebar-fg-dim">
                     {rootThreads.length} br
                   </span>
                 </Link>
                 {rootThreads.length === 0 ? (
-                  <div className="px-4 py-2 text-xs leading-5 text-white/45">
+                  <div className="px-4 py-2 text-meta leading-5 text-sidebar-fg-dim">
                     Hover a message and branch to populate this tree.
                   </div>
                 ) : (
@@ -326,11 +331,11 @@ export function AppShell() {
             ) : null}
 
             <section className="mt-5">
-              <div className="mb-1 px-4 font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-white/55">
+              <div className="mb-1 px-4 font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
                 Recent
               </div>
               {activeParentChats.slice(4).map((parentChat) => (
-                <div className="group flex items-center gap-2 px-4 py-1.5 text-sm text-[#d1c7d3]" key={parentChat.id}>
+                <div className="group flex items-center gap-2 px-4 py-1 text-body text-sidebar-fg" key={parentChat.id}>
                   <Link
                     className="min-w-0 flex-1 truncate transition hover:text-white"
                     params={{ chatId: parentChat.id }}
@@ -351,15 +356,15 @@ export function AppShell() {
 
             {showArchived ? (
               <section className="mt-5">
-                <div className="mb-1 px-4 font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-white/55">
+                <div className="mb-1 px-4 font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
                   Archived
                 </div>
                 {archivedParentChats.length === 0 ? (
-                  <div className="px-4 py-2 text-xs text-white/45">No archived chats.</div>
+                  <div className="px-4 py-2 text-meta text-sidebar-fg-dim">No archived chats.</div>
                 ) : (
                   archivedParentChats.map((parentChat) => (
                     <button
-                      className="flex w-full items-center gap-2 px-4 py-1.5 text-left text-sm text-white/65 transition hover:bg-white/8 hover:text-white"
+                      className="flex w-full items-center gap-2 px-4 py-1 text-left text-body text-sidebar-fg transition hover:bg-sidebar-hover hover:text-white"
                       key={parentChat.id}
                       onClick={() => void restoreParentChat(parentChat.id)}
                       type="button"
@@ -373,25 +378,25 @@ export function AppShell() {
             ) : null}
           </div>
 
-          <div className="border-t border-white/10 p-3">
+          <div className="border-t border-sidebar-line p-3">
             <div
               className={cn(
-                'mb-3 inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium',
+                'mb-3 inline-flex items-center gap-1 rounded px-2 py-1 text-pill font-medium',
                 settings?.openRouterApiKey
-                  ? 'bg-emerald-400/15 text-emerald-200'
-                  : 'bg-amber-400/15 text-amber-200',
+                  ? 'bg-send-soft text-send'
+                  : 'bg-warn/15 text-warn',
               )}
             >
               <KeyRound className="size-3" />
               {settings?.openRouterApiKey ? 'OpenRouter ready' : 'Add API key'}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <Button className="h-9 justify-center rounded bg-white/10 text-white hover:bg-white/15" onClick={handleNewParentChat}>
+              <Button className="h-9 justify-center rounded bg-sidebar-hover text-white hover:bg-white/15" onClick={handleNewParentChat}>
                 <MessageSquarePlus className="size-4" />
                 New
               </Button>
               <button
-                className="rounded border border-white/10 px-3 text-xs font-medium text-white/65 transition hover:bg-white/8 hover:text-white"
+                className="rounded border border-sidebar-line px-3 text-pill font-medium text-sidebar-fg transition hover:bg-sidebar-hover hover:text-white"
                 onClick={() => setShowArchived((value) => !value)}
                 type="button"
               >
@@ -401,7 +406,7 @@ export function AppShell() {
           </div>
         </aside>
 
-        <main className="min-h-0 min-w-0 overflow-hidden bg-white shadow-[inset_1px_0_0_rgba(10,20,40,0.09)]">
+        <main className="min-h-0 min-w-0 overflow-hidden bg-surface shadow-[inset_1px_0_0_var(--line)]">
           <Outlet />
         </main>
       </div>

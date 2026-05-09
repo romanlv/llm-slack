@@ -8,8 +8,25 @@ import { Button } from '@/components/ui/button'
 import { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ModelPicker } from '@/features/model-selection/components/model-picker'
-import { getSettings, saveSettings } from '@/lib/db'
+import { APP_THEMES, getSettings, saveSettings, type AppTheme } from '@/lib/db'
 import { DEFAULT_OPENROUTER_MODEL } from '@/lib/openrouter-models'
+import { cn } from '@/lib/utils'
+
+function ThemeSwatch({ theme }: { theme: AppTheme }) {
+  return (
+    <div
+      className="flex h-12 overflow-hidden rounded border border-line"
+      data-theme={theme}
+    >
+      <div className="w-1/3 bg-sidebar" />
+      <div className="flex w-2/3 flex-col gap-1 bg-surface px-2 py-1.5">
+        <span className="h-1.5 w-2/3 rounded-full bg-ink-dim/40" />
+        <span className="inline-flex h-2.5 w-12 items-center rounded-xs bg-send" />
+        <span className="h-1 w-1/2 rounded-full bg-accent/60" />
+      </div>
+    </div>
+  )
+}
 
 export function SettingsPage() {
   const settings = useLiveQuery(() => getSettings(), [], undefined)
@@ -31,6 +48,10 @@ export function SettingsPage() {
     window.setTimeout(() => setSavedMessage(''), 2500)
   }
 
+  const handleThemeChange = (theme: AppTheme) => {
+    void saveSettings({ theme })
+  }
+
   return (
     <div className="p-6 md:p-10">
       <CardHeader className="px-0 pt-0">
@@ -43,6 +64,39 @@ export function SettingsPage() {
       </CardHeader>
 
       <CardContent className="grid gap-6 px-0 pb-0">
+        <section className="grid gap-3">
+          <div>
+            <h3 className="text-title font-semibold text-ink">Appearance</h3>
+            <p className="mt-1 text-tab text-ink-muted">
+              Themes recolor the entire workspace. The choice is stored locally.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {APP_THEMES.map((option) => {
+              const selected = (settings?.theme ?? 'aubergine') === option.id
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => handleThemeChange(option.id)}
+                  className={cn(
+                    'group flex flex-col gap-2 rounded-md border p-3 text-left transition',
+                    selected
+                      ? 'border-accent bg-accent-soft'
+                      : 'border-line bg-surface hover:border-accent-border',
+                  )}
+                >
+                  <ThemeSwatch theme={option.id} />
+                  <div>
+                    <div className="text-tab font-semibold text-ink">{option.label}</div>
+                    <div className="mt-0.5 text-meta text-ink-muted">{option.description}</div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </section>
         <form
           className="grid gap-4"
           key={
@@ -97,12 +151,12 @@ export function SettingsPage() {
           </div>
         </form>
 
-        <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-900">
+        <div className="rounded-md border border-warn/30 bg-pin-bg p-5 text-tab leading-6 text-ink-muted">
           <div className="flex items-start gap-3">
-            <ShieldAlert className="mt-0.5 size-5 shrink-0" />
+            <ShieldAlert className="mt-0.5 size-5 shrink-0 text-warn" />
             <div>
-              <p className="font-medium">Browser-only security tradeoff</p>
-              <p className="mt-1 text-amber-800">
+              <p className="font-semibold text-ink">Browser-only security tradeoff</p>
+              <p className="mt-1">
                 Anyone with local access to this browser profile can read the saved
                 key. This is acceptable for local testing, but not for a public app
                 that uses your own shared production credentials.
@@ -111,8 +165,8 @@ export function SettingsPage() {
           </div>
         </div>
 
-        <div className="rounded-3xl border border-border bg-white/70 p-5 text-sm leading-6 text-muted-foreground">
-          <p className="font-medium text-foreground">Test flow</p>
+        <div className="rounded-md border border-line bg-surface p-5 text-tab leading-6 text-ink-muted">
+          <p className="font-semibold text-ink">Test flow</p>
           <ol className="mt-3 list-decimal space-y-2 pl-5">
             <li>Paste your OpenRouter API key here and save.</li>
             <li>Open or create a parent chat.</li>
@@ -125,7 +179,7 @@ export function SettingsPage() {
           </ol>
 
           <a
-            className="mt-4 inline-flex items-center gap-2 text-foreground underline"
+            className="mt-4 inline-flex items-center gap-2 text-ink underline"
             href="https://openrouter.ai/docs/api-reference/chat-completion"
             rel="noreferrer"
             target="_blank"

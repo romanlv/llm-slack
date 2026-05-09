@@ -8,7 +8,6 @@ import {
   ChevronDown,
   GitBranch,
   GitFork,
-  Hash,
   LoaderCircle,
   MoreHorizontal,
   Paperclip,
@@ -148,7 +147,7 @@ function MessageText({ content, streaming }: { content: string; streaming?: bool
   const lines = content ? content.split('\n') : streaming ? ['...'] : []
 
   return (
-    <div className="min-w-0 max-w-full space-y-2 overflow-hidden whitespace-pre-wrap break-words text-[15px] leading-7 [overflow-wrap:anywhere]">
+    <div className="min-w-0 max-w-full space-y-1.5 overflow-hidden whitespace-pre-wrap break-words text-body [overflow-wrap:anywhere]">
       {lines.map((line, index) => {
         if (!line.trim()) {
           return <div className="h-1" key={`space-${index}`} />
@@ -156,7 +155,7 @@ function MessageText({ content, streaming }: { content: string; streaming?: bool
 
         if (line.startsWith('# ')) {
           return (
-            <h2 className="text-lg font-bold tracking-tight" key={`${line}-${index}`}>
+            <h2 className="text-h1 font-bold tracking-tight" key={`${line}-${index}`}>
               {renderInline(line.slice(2))}
             </h2>
           )
@@ -164,7 +163,7 @@ function MessageText({ content, streaming }: { content: string; streaming?: bool
 
         if (line.startsWith('## ')) {
           return (
-            <h3 className="text-base font-bold tracking-tight" key={`${line}-${index}`}>
+            <h3 className="text-title font-bold tracking-tight" key={`${line}-${index}`}>
               {renderInline(line.slice(3))}
             </h3>
           )
@@ -179,7 +178,7 @@ function MessageText({ content, streaming }: { content: string; streaming?: bool
 function Avatar({ message }: { message: ChatMessage }) {
   if (message.role === 'assistant') {
     return (
-      <div className="flex size-8 shrink-0 items-center justify-center rounded bg-[#611f69] font-mono text-lg font-bold text-white">
+      <div className="flex size-7 shrink-0 items-center justify-center rounded bg-accent font-mono text-h1 font-bold leading-none text-white">
         ~
       </div>
     )
@@ -187,14 +186,14 @@ function Avatar({ message }: { message: ChatMessage }) {
 
   if (message.role === 'system') {
     return (
-      <div className="flex size-8 shrink-0 items-center justify-center rounded bg-slate-600 font-mono text-[11px] font-bold text-white">
+      <div className="flex size-7 shrink-0 items-center justify-center rounded bg-ink-muted font-mono text-meta font-bold text-white">
         SYS
       </div>
     )
   }
 
   return (
-    <div className="flex size-8 shrink-0 items-center justify-center rounded bg-[#ecb22e] font-mono text-[11px] font-black text-[#3f0e40]">
+    <div className="flex size-7 shrink-0 items-center justify-center rounded bg-yellow font-mono text-meta font-black text-sidebar">
       MC
     </div>
   )
@@ -218,66 +217,69 @@ function MessageBlock({
   return (
     <article
       className={cn(
-        'group relative flex gap-3 px-5 py-2.5 transition hover:bg-[#f6f6f6]',
-        active ? 'border-l-2 border-[#e8912d] bg-[#fffaf4]' : 'border-l-2 border-transparent',
+        'group relative flex gap-3 px-5 py-1.5 transition hover:bg-surface-hover',
+        active ? 'border-l-2 border-pin bg-pin-bg' : 'border-l-2 border-transparent',
         compact ? 'px-4' : '',
       )}
     >
       <Avatar message={message} />
       <div className="min-w-0 max-w-full flex-1 overflow-hidden">
-        <div className="mb-1 flex flex-wrap items-baseline gap-2">
-          <span className="font-bold text-[#1d1c1d]">{authorLabel(message)}</span>
+        <div className="mb-0.5 flex flex-wrap items-baseline gap-2">
+          <span className="text-body font-bold text-ink">{authorLabel(message)}</span>
           {message.role === 'assistant' && message.model ? (
-            <span className="rounded border border-black/10 bg-[#f4f2f0] px-1.5 py-0.5 font-mono text-[11px] text-[#616061]">
+            <span className="rounded border border-line bg-surface-muted px-1 py-px font-mono text-meta text-ink-muted">
               {modelShortName(message.model)}
             </span>
           ) : null}
-          <span className="font-mono text-[11px] text-[#868686]">
+          <span className="font-mono text-meta text-ink-dim">
             {formatTime(message.createdAt)}
           </span>
           {message.status === 'streaming' ? (
-            <span className="inline-flex items-center gap-1 font-mono text-[11px] text-[#611f69]">
+            <span className="inline-flex items-center gap-1 font-mono text-meta text-accent">
               <LoaderCircle className="size-3 animate-spin" />
               streaming
             </span>
           ) : null}
           {isError ? (
-            <span className="font-mono text-[11px] font-bold text-red-600">error</span>
+            <span className="font-mono text-meta font-bold text-danger">error</span>
           ) : null}
         </div>
 
         <MessageText content={message.content} streaming={message.status === 'streaming'} />
 
         {message.error ? (
-          <p className="mt-2 text-xs leading-5 text-red-700">{message.error}</p>
+          <p className="mt-2 text-meta leading-5 text-danger">{message.error}</p>
         ) : null}
 
         {hasReplies ? (
           <button
-            className="mt-3 inline-flex items-center gap-2 rounded border border-black/10 bg-white px-3 py-1.5 text-sm font-semibold text-[#1d1c1d] shadow-sm transition hover:border-[#b794b9] hover:text-[#611f69]"
+            className="mt-1.5 inline-flex items-center gap-1.5 self-start rounded border border-line border-l-2 border-l-accent bg-surface px-2 py-1 text-tab font-semibold text-ink transition hover:border-accent-border hover:text-accent"
             onClick={() => onOpenThread(message.id)}
             type="button"
           >
-            <GitBranch className="size-4 text-[#611f69]" />
+            <GitBranch className="size-3 text-accent" />
             {replyCount} {replyCount === 1 ? 'msg' : 'msgs'}
           </button>
         ) : null}
       </div>
 
-      <div className="absolute right-6 top-1 hidden overflow-hidden rounded border border-black/10 bg-white shadow-[0_4px_16px_rgba(0,0,0,0.10)] group-hover:flex">
+      <div className="absolute right-4 -top-3 hidden overflow-hidden rounded border border-line-strong bg-surface shadow-[0_2px_6px_rgba(0,0,0,0.08)] group-hover:flex">
         <button
-          className="inline-flex items-center gap-1.5 border-r border-black/10 px-3 py-1.5 font-mono text-xs font-semibold text-[#611f69] transition hover:bg-[#f9f1f9]"
+          className="inline-flex items-center gap-1 border-r border-line px-2 py-1 font-mono text-pill font-bold text-accent transition hover:bg-accent-soft"
           onClick={() => onOpenThread(message.id)}
           type="button"
         >
-          <GitBranch className="size-3.5" />
+          <GitBranch className="size-3" />
           branch
         </button>
-        <button className="px-2 text-[#616061] transition hover:bg-[#f4f2f0]" type="button">
-          <Bookmark className="size-3.5" />
+        <button className="border-r border-line px-2 py-1 font-mono text-pill text-ink-muted transition hover:bg-surface-muted" type="button">
+          <Bookmark className="size-3" />
         </button>
-        <button className="px-2 text-[#616061] transition hover:bg-[#f4f2f0]" type="button">
-          <MoreHorizontal className="size-3.5" />
+        <button className="border-r border-line px-2 py-1 font-mono text-pill text-ink-muted transition hover:bg-surface-muted" type="button">
+          <Pin className="size-3" />
+        </button>
+        <button className="px-2 py-1 font-mono text-pill text-ink-muted transition hover:bg-surface-muted" type="button">
+          <MoreHorizontal className="size-3" />
         </button>
       </div>
     </article>
@@ -296,10 +298,10 @@ function MiniModelSelect({
   const inKnownList = OPENROUTER_TRENDING_MODELS.some((model) => model.id === value)
 
   return (
-    <label className="inline-flex h-8 min-w-0 max-w-full items-center gap-1 rounded border border-black/10 bg-[#f4f2f0] px-2 font-mono text-xs text-[#616061]">
-      <span className="text-[#611f69]">●</span>
+    <label className="inline-flex h-[22px] min-w-0 max-w-full items-center gap-1 rounded-xs border border-line bg-surface-muted px-1.5 font-mono text-meta text-ink">
+      <span className="leading-none text-accent">●</span>
       <select
-        className="min-w-0 max-w-36 bg-transparent text-[#1d1c1d] outline-none disabled:opacity-60"
+        className="min-w-0 max-w-32 bg-transparent text-ink outline-none disabled:opacity-60"
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         value={value}
@@ -311,7 +313,7 @@ function MiniModelSelect({
         ))}
         {!inKnownList ? <option value={value}>{modelShortName(value)}</option> : null}
       </select>
-      <ChevronDown className="size-3" />
+      <ChevronDown className="size-2.5 text-ink-dim" />
     </label>
   )
 }
@@ -347,20 +349,20 @@ function ContextMeter({ compact, usage }: { compact?: boolean; usage?: ProviderU
 
   return (
     <div
-      className="inline-flex h-8 items-center gap-2 rounded border border-black/10 bg-[#f4f2f0] px-2 font-mono text-xs text-[#616061]"
+      className="inline-flex h-[22px] items-center gap-1.5 rounded-xs border border-line bg-surface-muted px-1.5 font-mono text-meta text-ink-muted"
       title={usage ? inputOutputLabel : 'Provider token usage appears after a completed reply.'}
     >
       <span
-        className="relative size-4 rounded-full border border-black/10"
+        className="relative size-3 rounded-full border border-line"
         style={{
           background:
             usage && typeof percentUsed === 'number'
-              ? `conic-gradient(#007a5a ${circleProgress}%, rgba(0,0,0,0.08) 0)`
+              ? `conic-gradient(var(--send) ${circleProgress}%, color-mix(in srgb, var(--ink) 8%, transparent) 0)`
               : undefined,
         }}
       />
-      <strong className="text-[#1d1c1d]">{primary}</strong>
-      <span>·</span>
+      <strong className="text-ink">{primary}</strong>
+      <span className="text-ink-dim">·</span>
       <span>{secondary}</span>
     </div>
   )
@@ -402,12 +404,12 @@ function ConversationComposer({
   }, [value])
 
   return (
-    <form className="px-5 pb-5 pt-3" onSubmit={onSubmit} ref={formRef}>
-      <div className="overflow-hidden rounded border border-black/15 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
-        <div className="flex items-start gap-2 px-4 py-3">
-          <span className="mt-1 font-mono text-[#611f69]">›</span>
+    <form className="px-5 pb-3.5 pt-1.5" onSubmit={onSubmit} ref={formRef}>
+      <div className="overflow-hidden rounded-md border border-line-strong bg-surface">
+        <div className="flex items-start gap-1.5 px-3 pt-2.5 pb-1">
+          <span className="mt-px font-mono text-body text-accent">›</span>
           <textarea
-            className="min-h-10 flex-1 resize-none border-0 bg-transparent text-[15px] leading-6 text-[#1d1c1d] outline-none placeholder:text-[#868686]"
+            className="min-h-[22px] flex-1 resize-none border-0 bg-transparent text-body text-ink outline-none placeholder:text-ink-dim"
             disabled={disabled}
             onChange={(event: ChangeEvent<HTMLTextAreaElement>) => onChange(event.target.value)}
             onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -424,27 +426,32 @@ function ConversationComposer({
             value={value}
           />
         </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-black/10 bg-[#fbfbfb] px-3 py-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-line px-1.5 py-1 pl-2">
           <MiniModelSelect disabled={disabled} onChange={onModelChange} value={model} />
           <ContextMeter compact={tone === 'thread'} usage={usage} />
           {tone === 'parent' ? (
-            <div className="hidden h-8 items-center gap-2 rounded border border-[#b794b9] px-2 font-mono text-xs font-semibold text-[#611f69] sm:inline-flex">
-              <GitBranch className="size-3.5" />
+            <button
+              type="button"
+              className="hidden h-[22px] items-center gap-1.5 rounded-xs border border-accent-border bg-surface-muted px-1.5 font-mono text-meta font-semibold text-accent transition hover:bg-accent-soft sm:inline-flex"
+            >
+              <GitBranch className="size-2.5" />
               reply in thread
-              <span className="h-3 w-6 rounded-full bg-[#d8d8d8]" />
-            </div>
+              <span className="relative h-2 w-3.5 rounded-full bg-line-strong">
+                <span className="absolute left-0.5 top-0.5 size-1.5 rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.2)]" />
+              </span>
+            </button>
           ) : null}
           <div className="flex-1" />
-          <button className="rounded px-2 py-1 text-[#616061] transition hover:bg-[#f4f2f0]" type="button">
-            <Paperclip className="size-4" />
+          <button className="rounded-xs p-1 text-ink-dim transition hover:bg-surface-muted" type="button">
+            <Paperclip className="size-3.5" />
           </button>
           <button
-            className="inline-flex h-8 items-center gap-1 rounded bg-[#007a5a] px-3 font-mono text-xs font-bold text-white transition hover:bg-[#00684d] disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-[22px] items-center gap-1 rounded-xs bg-send px-3 font-mono text-pill font-bold tracking-wide text-white transition hover:bg-send-hover disabled:cursor-not-allowed disabled:opacity-50"
             disabled={disabled || value.trim().length === 0}
             type="submit"
           >
             SEND
-            <SendHorizonal className="size-3.5" />
+            <SendHorizonal className="size-3" />
           </button>
         </div>
       </div>
@@ -464,40 +471,46 @@ function ChannelHeader({
   title: string
 }) {
   return (
-    <header className="border-b border-black/10 bg-white">
-      <div className="flex items-center gap-3 px-5 py-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <Hash className="size-4 shrink-0 text-[#868686]" />
+    <header className="border-b border-line bg-surface">
+      <div className="flex items-center gap-2.5 px-5 pb-1.5 pt-2.5">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="font-mono text-body text-ink-dim">#</span>
           <input
-            className="min-w-0 flex-1 border-0 bg-transparent text-lg font-bold tracking-tight outline-none"
+            className="min-w-0 flex-1 border-0 bg-transparent text-title font-bold leading-tight tracking-tight text-ink outline-none"
             onChange={(event) => onRename(event.target.value)}
             value={title}
           />
         </div>
-        <div className="hidden items-center gap-4 font-mono text-xs sm:flex">
-          <span className="text-[#868686]">
-            msgs <strong className="text-[#1d1c1d]">{messageCount}</strong>
+        <div className="hidden items-baseline gap-3 font-mono text-pill sm:flex">
+          <span className="text-ink-dim">
+            msgs <strong className="ml-1 text-ink">{messageCount}</strong>
           </span>
-          <span className="text-[#868686]">
-            branches <strong className="text-[#611f69]">{branchCount}</strong>
+          <span className="text-ink-dim">
+            branches <strong className="ml-1 text-accent">{branchCount}</strong>
           </span>
-          <GitFork className="size-4 text-[#616061]" />
         </div>
+        <button
+          type="button"
+          title="Branch map"
+          className="flex size-7 items-center justify-center rounded text-ink-muted transition hover:bg-surface-muted"
+        >
+          <GitFork className="size-3.5" />
+        </button>
       </div>
-      <nav className="flex items-center gap-1 px-4">
-        <button className="-mb-px border-b-2 border-[#611f69] px-3 py-2 text-sm font-semibold" type="button">
+      <nav className="flex items-center gap-0.5 px-3.5">
+        <button className="-mb-px border-b-2 border-accent px-2.5 pt-1.5 pb-2 text-tab font-semibold text-ink" type="button">
           Messages
         </button>
-        <button className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-[#616061]" type="button">
-          <Pin className="size-3.5" />
-          Pinned <span className="rounded-full bg-[#f4f2f0] px-1.5 font-mono text-[11px]">2</span>
+        <button className="inline-flex items-center gap-1.5 px-2.5 pt-1.5 pb-2 text-tab font-medium text-ink-muted hover:text-ink" type="button">
+          <Pin className="size-3" />
+          Pinned <span className="rounded-full border border-line bg-surface-muted px-1.5 font-mono text-meta font-semibold text-ink-muted">2</span>
         </button>
-        <button className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-[#616061]" type="button">
-          <Bookmark className="size-3.5" />
-          Saved <span className="rounded-full bg-[#f4f2f0] px-1.5 font-mono text-[11px]">1</span>
+        <button className="inline-flex items-center gap-1.5 px-2.5 pt-1.5 pb-2 text-tab font-medium text-ink-muted hover:text-ink" type="button">
+          <Bookmark className="size-3" />
+          Saved <span className="rounded-full border border-line bg-surface-muted px-1.5 font-mono text-meta font-semibold text-ink-muted">1</span>
         </button>
-        <button className="px-3 py-2 text-sm font-medium text-[#616061]" type="button">
-          Files <span className="rounded-full bg-[#f4f2f0] px-1.5 font-mono text-[11px]">4</span>
+        <button className="px-2.5 pt-1.5 pb-2 text-tab font-medium text-ink-muted hover:text-ink" type="button">
+          Files <span className="ml-1 rounded-full border border-line bg-surface-muted px-1.5 font-mono text-meta font-semibold text-ink-muted">4</span>
         </button>
       </nav>
     </header>
@@ -520,20 +533,20 @@ function LineageBar({
   }
 
   return (
-    <div className="border-b border-[#b794b9] bg-[#f9f1f9] px-5 py-2">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
+    <div className="border-b border-accent-border bg-accent-bg px-5 py-1.5">
+      <div className="flex flex-wrap items-center gap-1.5 text-tab">
         <Link
-          className="font-semibold text-[#611f69] underline-offset-4 hover:underline"
+          className="font-semibold text-accent underline-offset-4 hover:underline"
           params={{ chatId }}
           to="/chat/$chatId"
         >
           {parentTitle}
         </Link>
         {ancestors.map((ancestor) => (
-          <span className="inline-flex items-center gap-2" key={ancestor.thread.id}>
-            <span className="font-mono text-[#868686]">›</span>
+          <span className="inline-flex items-center gap-1.5" key={ancestor.thread.id}>
+            <span className="font-mono text-meta text-ink-dim">›</span>
             <Link
-              className="font-semibold text-[#611f69] underline-offset-4 hover:underline"
+              className="font-semibold text-accent underline-offset-4 hover:underline"
               params={{ chatId, threadId: ancestor.thread.id }}
               to="/chat/$chatId/thread/$threadId"
             >
@@ -541,9 +554,9 @@ function LineageBar({
             </Link>
           </span>
         ))}
-        <span className="inline-flex items-center gap-2">
-          <span className="font-mono text-[#868686]">›</span>
-          <span className="font-bold text-[#1d1c1d]">{branchLabel(activeRoot)}</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="font-mono text-meta text-ink-dim">›</span>
+          <span className="font-bold text-ink">{branchLabel(activeRoot)}</span>
         </span>
       </div>
     </div>
@@ -552,7 +565,7 @@ function LineageBar({
 
 function EmptyState({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-5 my-4 rounded border border-dashed border-black/15 bg-[#fbfbfb] px-4 py-5 text-sm leading-6 text-[#616061]">
+    <div className="mx-5 my-4 rounded border border-dashed border-line-strong bg-surface-muted px-4 py-5 text-tab leading-6 text-ink-muted">
       {children}
     </div>
   )
@@ -681,10 +694,10 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
     return (
       <div className="flex h-full min-h-0 items-center justify-center p-6 text-center">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-[#1d1c1d]">
+          <h2 className="text-h1 font-semibold tracking-tight text-ink">
             Parent chat not found
           </h2>
-          <p className="mt-2 max-w-md text-sm leading-6 text-[#616061]">
+          <p className="mt-2 max-w-md text-tab leading-6 text-ink-muted">
             This parent chat is missing locally. Return to the sidebar and open another one.
           </p>
         </div>
@@ -813,25 +826,18 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
       </section>
 
       {threadId ? (
-        <aside className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden border-l border-black/15 bg-white">
-          <header className="border-b border-black/10 px-5 py-3">
-            <div className="flex items-center gap-3">
-              <GitBranch className="size-4 shrink-0 text-[#611f69]" />
-              <div className="min-w-0 flex-1">
-                <h2 className="truncate text-lg font-bold tracking-tight">
-                  {branchLabel(rootMessage)}
-                </h2>
-                <div className="mt-1 flex items-center gap-2 font-mono text-xs text-[#616061]">
-                  <span>fork: {rootMessage ? formatTime(rootMessage.createdAt) : 'unknown'}</span>
-                  <span>·</span>
-                  <span>{threadMessages.length} msgs</span>
-                </div>
-              </div>
-              <button className="rounded border border-black/10 px-2 py-1 text-[#616061] transition hover:bg-[#f4f2f0]" type="button">
-                <MoreHorizontal className="size-4" />
+        <aside className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden border-l border-line-strong bg-surface">
+          <header className="border-b border-line px-3.5 pb-2 pt-2.5">
+            <div className="flex items-center gap-2">
+              <GitBranch className="size-3.5 shrink-0 text-accent" />
+              <h2 className="min-w-0 flex-1 truncate text-title font-bold tracking-tight text-ink">
+                {branchLabel(rootMessage)}
+              </h2>
+              <button className="rounded-xs border border-line px-2 font-mono text-pill leading-5 text-ink transition hover:bg-surface-muted" type="button">
+                ⋯
               </button>
               <button
-                className="rounded p-1 text-[#616061] transition hover:bg-[#f4f2f0] hover:text-[#1d1c1d]"
+                className="rounded p-0.5 leading-none text-ink-muted transition hover:text-ink"
                 onClick={() =>
                   void navigate({
                     to: '/chat/$chatId',
@@ -840,8 +846,13 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
                 }
                 type="button"
               >
-                <X className="size-5" />
+                <X className="size-4" />
               </button>
+            </div>
+            <div className="mt-1.5 flex items-center gap-2 font-mono text-meta text-ink-muted">
+              <span>fork: <span className="text-ink">{rootMessage ? formatTime(rootMessage.createdAt) : 'unknown'}</span></span>
+              <span>·</span>
+              <span>{threadMessages.length} msgs</span>
             </div>
           </header>
 
@@ -895,16 +906,16 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
       ) : null}
 
       {!threadId && parentMessages.length === 0 ? (
-        <div className="hidden items-center justify-center gap-3 border-l border-black/10 xl:flex">
+        <div className="hidden items-center justify-center gap-3 border-l border-line xl:flex">
           <div className="max-w-sm text-center">
-            <GitBranch className="mx-auto size-7 text-[#611f69]" />
-            <h3 className="mt-4 text-lg font-semibold text-[#1d1c1d]">
+            <GitBranch className="mx-auto size-7 text-accent" />
+            <h3 className="mt-4 text-h1 font-semibold text-ink">
               Branch from any message
             </h3>
-            <p className="mt-2 text-sm leading-6 text-[#616061]">
+            <p className="mt-2 text-tab leading-6 text-ink-muted">
               Hover a message and choose branch. Each branch can fork again without changing the parent chat.
             </p>
-            <p className="mt-3 text-xs text-[#616061]">
+            <p className="mt-3 text-meta text-ink-muted">
               Configure your OpenRouter key in <Link className="underline" to="/settings">Settings</Link>.
             </p>
           </div>
