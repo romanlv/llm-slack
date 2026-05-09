@@ -213,16 +213,9 @@ export function AppShell() {
       <div className="grid h-full min-h-0 lg:grid-cols-[260px_minmax(0,1fr)]">
         <aside className="hidden min-h-0 flex-col overflow-hidden bg-sidebar text-sidebar-fg lg:flex">
           <div className="border-b border-sidebar-line px-4 py-3">
-            <div className="flex items-center gap-3">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-yellow to-pink font-mono text-sm font-black text-sidebar">
-                A
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-title font-bold tracking-tight text-white">Arcadia Labs</div>
-                <div className="mt-0.5 flex items-center gap-1.5 text-pill text-sidebar-fg-muted">
-                  <span className="size-2 rounded-full bg-online" />
-                  Mira Chen
-                </div>
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1 truncate text-title font-bold tracking-tight text-white">
+                Deepchat
               </div>
               <Link
                 className="rounded-md p-1.5 text-sidebar-fg-muted transition hover:bg-sidebar-hover hover:text-white"
@@ -232,7 +225,7 @@ export function AppShell() {
               </Link>
             </div>
 
-            <div className="mt-4 flex items-center gap-2 rounded-md bg-black/25 px-3 py-2 text-tab text-sidebar-fg-muted">
+            <div className="mt-3 flex items-center gap-2 rounded-md bg-black/25 px-3 py-2 text-tab text-sidebar-fg-muted">
               <Search className="size-4" />
               <Input
                 className="h-6 border-0 bg-transparent p-0 font-mono text-tab text-white shadow-none placeholder:text-sidebar-fg-dim focus-visible:ring-0"
@@ -305,7 +298,7 @@ export function AppShell() {
                   params={{ chatId: activeParentChat.id }}
                   to="/chat/$chatId"
                 >
-                  <span className="size-2 rounded-full bg-online" />
+                  <Hash className="size-3.5 shrink-0 text-sidebar-fg-dim" />
                   <span className="min-w-0 flex-1 truncate">{activeParentChat.title}</span>
                   <span className="font-mono text-meta text-sidebar-fg-dim">
                     {rootThreads.length} br

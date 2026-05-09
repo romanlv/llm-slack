@@ -2,7 +2,7 @@
 
 ## Summary
 
-Deepchat is a browser-first LLM chat workspace inspired by Slack conversation
+Deepchat is a browser-first LLM chat surface inspired by Slack conversation
 threads.
 
 The product has two distinct conversation layers:
@@ -14,7 +14,7 @@ The product has two distinct conversation layers:
 Threads are not separate top-level chats in the sidebar. Instead, they are
 sub-conversations attached to messages inside a parent chat or another thread.
 
-The app should feel like a real message workspace:
+The app should feel like a real working chat tool:
 
 - left sidebar shows parent chats only
 - the main conversation view shows the selected parent chat
@@ -251,16 +251,21 @@ The root message must still remain visible at the top of that thread view.
 9. Browser-side provider configuration.
 10. Local persistence for parent chats, threads, messages, drafts, and settings.
 11. Streaming assistant responses where supported.
-12. Search across parent chats.
 
 ### Post-MVP features
 
-1. Search across threads and thread content.
-2. Context inheritance settings.
-3. Thread visual maps or breadcrumb navigation.
-4. Attachments and multimodal messages.
-5. Backend proxy for secure keys and unsupported providers.
-6. Cloud sync and collaboration.
+1. Message actions (edit, delete, copy, retry, regenerate, save, pin) and
+   markdown rendering. Tracked incrementally in `docs/features.md`.
+2. Search across parent chats and threads, including a `⌘K` command palette
+   and slash commands such as `/branch`.
+3. Context inheritance settings.
+4. Thread visual maps or breadcrumb navigation (the sidebar "branch map"
+   affordance).
+5. Attachments and multimodal messages.
+6. Agent definitions (model + system prompt + tools) and multiple agents
+   participating in a single conversation.
+7. Backend proxy for secure keys and unsupported providers.
+8. Cloud sync and collaboration.
 
 ## Functional Requirements
 
@@ -279,6 +284,24 @@ The root message must still remain visible at the top of that thread view.
 - A message may have zero or more direct thread replies.
 - Messages with direct thread replies must display a reply count and a control to
   open the thread.
+
+### Message actions
+
+These actions are post-MVP and ship incrementally per `docs/features.md`. They
+must respect the immutability rules in the architecture doc: messages referenced
+by thread roots or context snapshots are immutable revisions, edits create new
+revisions, and deletes prefer tombstones over hard removal.
+
+- copy message text
+- edit user messages (creates a new revision; the original revision is
+  preserved for any thread that already inherits it)
+- delete user or assistant messages (soft delete; root messages of existing
+  threads produce an explicit unavailable state rather than disappearing)
+- retry a failed assistant message
+- regenerate an assistant reply (treated as a new attempt under the same turn)
+- save (bookmark) a message into a per-user collection
+- pin a message within its parent chat or thread
+- markdown rendering for assistant and user message bodies
 
 ### Threads
 
@@ -311,7 +334,9 @@ The root message must still remain visible at the top of that thread view.
   selection applies to subsequent turns only.
 - Existing messages retain the model label that was used when they were sent.
 - Provider credentials are stored locally in MVP.
-- OpenAI-compatible APIs are the baseline browser integration path.
+- OpenRouter is the baseline browser integration path; additional providers
+  must conform to the chat-provider contract defined in
+  `src/features/providers/`.
 - Default export must exclude API keys and secrets.
 
 ### Persistence
@@ -327,9 +352,12 @@ The root message must still remain visible at the top of that thread view.
 
 ### Search
 
-- MVP search targets parent chats only.
-- Search must include parent chat title and recent parent-chat activity preview.
-- Search does not need full thread search in MVP.
+- MVP ships without functional search. The sidebar `⌘K` input is a placeholder
+  that does not query anything yet and will either be wired up or removed.
+- Near-term, a sidebar title-substring filter over parent chats is the first
+  search-shaped feature.
+- Full search across parent chats and threads, plus a slash-command palette,
+  is post-MVP.
 
 ### Error handling
 
@@ -430,6 +458,11 @@ The MVP is successful if a user can:
    but it is the default direction for post-MVP navigation.
 2. Parent chat search should eventually include thread hit counts and optionally
    surface matching thread snippets, but that enhancement is explicitly post-MVP.
+3. Agents (model + system prompt + tools) and multi-agent conversations will
+   reframe what "the assistant" means in a thread. When this lands, message
+   authorship, turn ownership, and per-message agent identity must be added to
+   the data model, and thread inheritance must define how agent changes
+   propagate. Out of scope until the single-assistant flow is solid.
 
 ## Recommended MVP Cut
 
