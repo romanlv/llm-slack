@@ -1,159 +1,32 @@
-import Dexie, { type EntityTable } from 'dexie'
-import { DEFAULT_OPENROUTER_MODEL } from '@/lib/openrouter-models'
+import Dexie from 'dexie'
+import {
+  messageToTransport,
+  previewText,
+  titleFromPrompt,
+  type ChatMessage,
+  type ConversationThread,
+  type ConversationType,
+  type MessageRole,
+  type ParentChat,
+  type ProviderUsage,
+  type ThreadAncestor,
+} from '@/features/chat/domain'
+import { db } from '@/features/chat/database'
+import { getSettings, type AppSettings } from '@/features/settings/settings-repository'
 
-export type MessageRole = 'assistant' | 'system' | 'user'
-export type MessageStatus = 'complete' | 'error' | 'streaming'
-export type ConversationType = 'parent' | 'thread'
-
-export interface ParentChat {
-  id: string
-  title: string
-  model: string
-  createdAt: number
-  updatedAt: number
-  archivedAt?: number
-  draft: string
-  lastActivityPreview: string
+export {
+  previewText,
+  type AppSettings,
+  type ChatMessage,
+  type ConversationThread,
+  type ConversationType,
+  type MessageRole,
+  type ParentChat,
+  type ProviderUsage,
+  type ThreadAncestor,
 }
 
-export interface ConversationThread {
-  id: string
-  parentChatId: string
-  parentThreadId?: string
-  rootMessageId: string
-  depth: number
-  draft: string
-  model: string
-  createdAt: number
-  updatedAt: number
-}
-
-export interface ProviderUsage {
-  provider: string
-  promptTokens?: number
-  completionTokens?: number
-  totalTokens?: number
-  reasoningTokens?: number
-  cachedTokens?: number
-  costCredits?: number
-  contextWindowTokens?: number
-  remainingTokens?: number
-  recordedAt: number
-  raw?: unknown
-}
-
-export interface ChatMessage {
-  id: string
-  conversationType: ConversationType
-  conversationId: string
-  parentChatId: string
-  role: MessageRole
-  content: string
-  createdAt: number
-  status: MessageStatus
-  directReplyCount: number
-  model?: string
-  providerRequestId?: string
-  providerUsage?: ProviderUsage
-  error?: string
-}
-
-export type AppTheme = 'aubergine' | 'midnight' | 'paper'
-
-export const APP_THEMES: ReadonlyArray<{ id: AppTheme; label: string; description: string }> = [
-  {
-    id: 'aubergine',
-    label: 'Aubergine',
-    description: 'Default Slack-flavored palette · deep plum sidebar, green send.',
-  },
-  {
-    id: 'midnight',
-    label: 'Midnight',
-    description: 'Dark mode · low-light surfaces with indigo accents.',
-  },
-  {
-    id: 'paper',
-    label: 'Paper',
-    description: 'Warm off-white workspace · orange accent.',
-  },
-]
-
-export interface AppSettings {
-  id: 'app'
-  openRouterApiKey: string
-  defaultModel: string
-  siteUrl: string
-  siteName: string
-  theme: AppTheme
-}
-
-export interface ThreadAncestor {
-  thread: ConversationThread
-  rootMessage: ChatMessage
-}
-
-const DEFAULT_MODEL = DEFAULT_OPENROUTER_MODEL
-
-const DEFAULT_SETTINGS: AppSettings = {
-  id: 'app',
-  openRouterApiKey: '',
-  defaultModel: DEFAULT_MODEL,
-  siteUrl: typeof window !== 'undefined' ? window.location.origin : '',
-  siteName: 'Deepchat',
-  theme: 'aubergine',
-}
-
-class DeepchatDatabase extends Dexie {
-  parentChats!: EntityTable<ParentChat, 'id'>
-  threads!: EntityTable<ConversationThread, 'id'>
-  messages!: EntityTable<ChatMessage, 'id'>
-  settings!: EntityTable<AppSettings, 'id'>
-
-  constructor() {
-    super('deepchat-threaded')
-
-    this.version(1).stores({
-      parentChats: 'id, createdAt, updatedAt, archivedAt',
-      threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
-      messages:
-        'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
-      settings: 'id',
-    })
-  }
-}
-
-export const db = new DeepchatDatabase()
-
-export function previewText(content: string) {
-  return content.trim().replace(/\s+/g, ' ').slice(0, 140)
-}
-
-function titleFromPrompt(content: string) {
-  const compact = previewText(content)
-  return compact.length > 52 ? `${compact.slice(0, 49)}...` : compact
-}
-
-export async function getSettings() {
-  const existing = await db.settings.get('app')
-  if (existing) {
-    return { ...DEFAULT_SETTINGS, ...existing }
-  }
-
-  await db.settings.put(DEFAULT_SETTINGS)
-  return DEFAULT_SETTINGS
-}
-
-export async function saveSettings(updates: Partial<Omit<AppSettings, 'id'>>) {
-  const current = await getSettings()
-  const next: AppSettings = {
-    ...current,
-    ...updates,
-    id: 'app',
-  }
-
-  await db.settings.put(next)
-  return next
-}
+export { db }
 
 export async function createParentChat(input?: Partial<Pick<ParentChat, 'model' | 'title'>>) {
   const settings = await getSettings()
@@ -474,21 +347,6 @@ export async function markThreadDraftSent(threadId: string, parentChatId: string
   })
   await updateParentChatActivity(parentChatId, prompt, prompt)
   await syncRootReplyCountForThread(threadId)
-}
-
-function messageToTransport(messages: ChatMessage[]) {
-  return messages
-    .filter((message) => {
-      if (message.role === 'assistant') {
-        return message.status === 'complete' && message.content.trim().length > 0
-      }
-
-      return message.content.trim().length > 0
-    })
-    .map((message) => ({
-      role: message.role,
-      content: message.content,
-    }))
 }
 
 export async function getParentConversation(parentChatId: string) {

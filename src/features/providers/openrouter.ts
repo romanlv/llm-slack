@@ -1,31 +1,8 @@
-type OpenRouterMessage = {
-  role: 'assistant' | 'system' | 'user'
-  content: string
-}
-
-type SendOpenRouterChatInput = {
-  apiKey: string
-  model: string
-  messages: OpenRouterMessage[]
-  siteName?: string
-  siteUrl?: string
-  onChunk: (chunk: string) => void
-  onMessageId?: (id: string) => void
-}
-
-export type ProviderUsage = {
-  provider: string
-  promptTokens?: number
-  completionTokens?: number
-  totalTokens?: number
-  reasoningTokens?: number
-  cachedTokens?: number
-  costCredits?: number
-  contextWindowTokens?: number
-  remainingTokens?: number
-  recordedAt: number
-  raw?: unknown
-}
+import type {
+  ChatProviderUsage,
+  StreamChatCompletionInput,
+  StreamChatCompletionResult,
+} from '@/features/providers/provider-contract'
 
 type OpenRouterStreamChoice = {
   delta?: { content?: unknown }
@@ -46,7 +23,7 @@ function objectValue(value: unknown) {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined
 }
 
-function normalizeUsage(usage: unknown): ProviderUsage | undefined {
+function normalizeUsage(usage: unknown): ChatProviderUsage | undefined {
   const data = objectValue(usage)
   if (!data) {
     return undefined
@@ -54,7 +31,7 @@ function normalizeUsage(usage: unknown): ProviderUsage | undefined {
 
   const promptDetails = objectValue(data.prompt_tokens_details)
   const completionDetails = objectValue(data.completion_tokens_details)
-  const normalized: ProviderUsage = {
+  const normalized: ChatProviderUsage = {
     provider: 'openrouter',
     promptTokens: numberValue(data.prompt_tokens),
     completionTokens: numberValue(data.completion_tokens),
@@ -117,7 +94,7 @@ export async function sendOpenRouterChat({
   onMessageId,
   siteName,
   siteUrl,
-}: SendOpenRouterChatInput) {
+}: StreamChatCompletionInput): Promise<StreamChatCompletionResult> {
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -154,7 +131,7 @@ export async function sendOpenRouterChat({
   let buffer = ''
   let fullText = ''
   let requestId = ''
-  let usage: ProviderUsage | undefined
+  let usage: ChatProviderUsage | undefined
 
   while (true) {
     const { done, value } = await reader.read()

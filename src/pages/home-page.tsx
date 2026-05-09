@@ -3,7 +3,7 @@ import { Database, GitBranch, Layers3 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { createParentChat } from '@/lib/db'
+import { createParentChat } from '@/features/chat/repository'
 
 const pillars = [
   {

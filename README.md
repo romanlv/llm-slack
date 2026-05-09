@@ -25,11 +25,15 @@ pnpm lint
 - `src/app/`: application shell and top-level layout
 - `src/components/ui/`: shared UI primitives only
 - `src/features/chat/`: parent-chat and Slack-style thread experience
-- `src/features/model-selection/`: reusable OpenRouter model selection controls
+- `src/features/providers/`: provider contract, OpenRouter transport, and model metadata
+- `src/features/settings/`: settings persistence and settings page content
+- `src/features/model-selection/`: reusable model selection controls
 - `src/pages/`: route-level page adapters
-- `src/lib/db.ts`: IndexedDB schema for parent chats, threads, and messages
-- `src/lib/openrouter.ts`: browser-side OpenRouter chat transport
+- `src/features/chat/database.ts`: IndexedDB schema for parent chats, threads, messages, and settings
+- `src/features/chat/repository.ts`: local chat persistence operations
+- `src/features/chat/send-turn.ts`: assistant send and streaming workflow
 - `docs/threaded-chat-prd.md`: product requirements for the thread-based app
+- `docs/architecture.md`: architecture guide and migration backlog
 
 ## Current state
 

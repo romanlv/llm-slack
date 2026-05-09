@@ -7,14 +7,14 @@ import {
   finalizeParentChatAfterSend,
   finalizeThreadAfterSend,
   getParentConversation,
-  getSettings,
   getThreadConversation,
   markParentDraftSent,
   markThreadDraftSent,
   syncRootReplyCountForThread,
   updateMessage,
-} from '@/lib/db'
-import { sendOpenRouterChat } from '@/lib/openrouter'
+} from '@/features/chat/repository'
+import { getSettings } from '@/features/settings/settings-repository'
+import { sendOpenRouterChat } from '@/features/providers/openrouter'
 
 const APPROX_CONTEXT_CHAR_LIMIT = 48_000
 

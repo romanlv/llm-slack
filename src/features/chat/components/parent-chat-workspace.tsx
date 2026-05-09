@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react'
 
-import { sendParentChatTurn, sendThreadTurn } from '@/features/chat/chat-runtime'
+import { sendParentChatTurn, sendThreadTurn } from '@/features/chat/send-turn'
 import {
   db,
   getThreadAncestorChain,
@@ -32,8 +32,8 @@ import {
   type ConversationThread,
   type ProviderUsage,
   type ThreadAncestor,
-} from '@/lib/db'
-import { OPENROUTER_TRENDING_MODELS } from '@/lib/openrouter-models'
+} from '@/features/chat/repository'
+import { OPENROUTER_TRENDING_MODELS } from '@/features/providers/openrouter-models'
 import { cn } from '@/lib/utils'
 
 type ParentChatWorkspaceProps = {

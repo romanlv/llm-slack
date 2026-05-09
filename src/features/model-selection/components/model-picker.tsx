@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import {
   DEFAULT_OPENROUTER_MODEL,
   OPENROUTER_TRENDING_MODELS,
-} from '@/lib/openrouter-models'
+} from '@/features/providers/openrouter-models'
 import { cn } from '@/lib/utils'
 
 type ModelPickerProps = {

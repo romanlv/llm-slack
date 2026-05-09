@@ -25,7 +25,8 @@ import {
   type ChatMessage,
   type ConversationThread,
   type ParentChat,
-} from '@/lib/db'
+} from '@/features/chat/repository'
+import { getSettings } from '@/features/settings/settings-repository'
 import { cn } from '@/lib/utils'
 
 function formatUpdatedAt(timestamp: number) {
@@ -136,7 +137,7 @@ export function AppShell() {
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
   const { activeChatId, activeThreadId } = parseChatPath(location.pathname)
 
-  const settings = useLiveQuery(() => db.settings.get('app'), [], undefined)
+  const settings = useLiveQuery(() => getSettings(), [], undefined)
   const parentChats = useLiveQuery(
     () => db.parentChats.orderBy('updatedAt').reverse().toArray(),
     [],
