@@ -1,0 +1,4 @@
+#!/bin/zsh
+source /Users/roman/.nvm/nvm.sh
+nvm use 22.20.0 >/dev/null
+exec agent-browser "$@"
