@@ -35,6 +35,9 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
   if (!parentChat) {
     throw new Error('Parent chat not found.')
   }
+  if (parentChat.archivedAt) {
+    throw new Error('Archived parent chats cannot accept new sends.')
+  }
 
   const runtimeSettings = await getSettings()
   if (!runtimeSettings.openRouterApiKey.trim()) {
@@ -105,6 +108,13 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
   const thread = await db.threads.get(threadId)
   if (!thread) {
     throw new Error('Thread not found.')
+  }
+  const parentChat = await db.parentChats.get(thread.parentChatId)
+  if (!parentChat) {
+    throw new Error('Parent chat not found.')
+  }
+  if (parentChat.archivedAt) {
+    throw new Error('Archived parent chats cannot accept new sends.')
   }
 
   const runtimeSettings = await getSettings()

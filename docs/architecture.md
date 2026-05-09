@@ -395,6 +395,8 @@ Priority coverage:
 Recommended tools and rules:
 
 - Use Vitest for domain, service, and provider tests.
+- Keep tests colocated next to the files they verify, using `*.test.ts` or
+  `*.test.tsx`.
 - Use fake IndexedDB for persistence tests.
 - Use React Testing Library for component behavior that cannot be tested as pure
   domain logic.
@@ -410,7 +412,7 @@ Items are ordered within each tier; do the lower numbers first.
 
 ### P0a: Semantic Safety
 
-- [ ] P0a.1 Add characterization tests for branch context, nested threads, cascade
+- [x] P0a.1 Add characterization tests for branch context, nested threads, cascade
   delete, send lifecycle, and provider stream parsing.
 - [ ] P0a.2 Document browser-side API key risk and define the backend-proxy
   threshold before any public or multi-user deployment.
@@ -502,9 +504,10 @@ At the time this document was created, the project had:
 
 - TypeScript typechecking via `pnpm typecheck`
 - ESLint via `pnpm lint`
-- no automated test suite
+- Vitest via `pnpm test`, with fake IndexedDB for persistence tests
 - direct Dexie usage from both library and UI code
 - direct OpenRouter dependency from chat runtime
 
-The next major architecture milestone is to add tests around conversation
-semantics, then refactor boundaries with those tests in place.
+The next major architecture milestone is to expand tests around stale streaming,
+retry metadata, migrations, and UI behavior, then continue refactoring
+boundaries with those tests in place.

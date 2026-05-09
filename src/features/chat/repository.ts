@@ -369,7 +369,12 @@ async function getConversationUpToMessage(messageId: string): Promise<
   if (message.conversationType === 'parent') {
     const messages = await db.messages
       .where('[conversationId+createdAt]')
-      .between([message.parentChatId, Dexie.minKey], [message.parentChatId, message.createdAt])
+      .between(
+        [message.parentChatId, Dexie.minKey],
+        [message.parentChatId, message.createdAt],
+        true,
+        true,
+      )
       .sortBy('createdAt')
 
     return messageToTransport(messages.filter((item) => item.conversationType === 'parent'))
@@ -383,7 +388,12 @@ async function getConversationUpToMessage(messageId: string): Promise<
   const inherited = await getConversationUpToMessage(parentThread.rootMessageId)
   const threadMessages = await db.messages
     .where('[conversationId+createdAt]')
-    .between([message.conversationId, Dexie.minKey], [message.conversationId, message.createdAt])
+    .between(
+      [message.conversationId, Dexie.minKey],
+      [message.conversationId, message.createdAt],
+      true,
+      true,
+    )
     .sortBy('createdAt')
 
   return [
