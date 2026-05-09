@@ -346,8 +346,8 @@ as partial.
 
 ## UI Guidelines
 
-Feature UI should remain dense, work-focused, and closer to a chat workspace
-than a marketing page.
+Feature UI should remain dense, work-focused, and closer to a working tool than
+a marketing page.
 
 Best practices:
 
@@ -399,7 +399,8 @@ Recommended tools and rules:
   `*.test.tsx`.
 - Use fake IndexedDB for persistence tests.
 - Use React Testing Library for component behavior that cannot be tested as pure
-  domain logic.
+  domain logic. Prefer accessibility-oriented queries and user events over
+  snapshots.
 - Use Playwright only for high-value end-to-end flows.
 - Provider tests must use fixtures or fakes and must not hit OpenRouter.
 - Domain tests should use injected clocks and id factories.
@@ -441,7 +442,9 @@ Items are ordered within each tier; do the lower numbers first.
 - [ ] P0d.1 Move `ParentChatWorkspace` toward `features/chat/components/` and
   split it into smaller components only where the boundary is useful.
 - [ ] P0d.2 Add frontend behavior tests for mobile thread layout, focus, keyboard
-  sends, disabled composers, and missing/error states.
+  sends, disabled composers, and missing/error states. Initial RTL coverage
+  exists for `ParentChatWorkspace`; mobile layout and focus behavior still need
+  explicit tests.
 
 ### P1: Before Edit/Delete/Retry Features
 
@@ -505,6 +508,7 @@ At the time this document was created, the project had:
 - TypeScript typechecking via `pnpm typecheck`
 - ESLint via `pnpm lint`
 - Vitest via `pnpm test`, with fake IndexedDB for persistence tests
+- React Testing Library for colocated component behavior tests
 - direct Dexie usage from both library and UI code
 - direct OpenRouter dependency from chat runtime
 
