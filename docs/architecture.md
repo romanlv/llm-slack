@@ -280,6 +280,19 @@ derived source to recompute from.
 excluding nested descendant threads. Changing this definition requires updating
 this document and the tests first.
 
+### Ordering Keys
+
+Persisted fields used to order rows (for example `PinnedMessage.sortKey`, future
+turn sequence numbers, draft revision counters) must be strictly monotonic
+within their grouping scope. `Date.now()` alone is not sufficient: two writes
+in the same millisecond produce identical keys, and Dexie's `sortBy` leaves
+their relative order undefined.
+
+When writing an ordering key, the writer should read the current max for the
+scope inside the same transaction and use `Math.max(Date.now(), maxExisting +
+1)`. The collision case must have a regression test that pins two rows under a
+mocked clock returning a constant value.
+
 ### Migrations And Repair
 
 Every persisted shape change requires a Dexie version bump, an `upgrade()`
@@ -413,6 +426,19 @@ Recommended tools and rules:
 - Domain tests should use injected clocks and id factories.
 - Refactors that move behavior must land with characterization tests for the
   current behavior first.
+
+Clock and id mocking rules:
+
+- When a test needs `Date.now()` to return different values across several
+  operations, use a single `vi.spyOn(Date, 'now')` and call `mockReturnValue`
+  between awaits to step the value forward. Do not chain
+  `mockReturnValueOnce(...)` to queue successive values — any incidental
+  `Date.now()` call inside Dexie transactions, library hooks, or test
+  scaffolding silently consumes a slot, shifts the queue, and produces an
+  order-dependent flake that only reproduces in the full suite.
+- Tests that depend on the relative order of rows produced by timestamped
+  fields must also cover the same-timestamp tie-break, not only the
+  happy-path "two writes one millisecond apart" case.
 
 ## Improvement Backlog
 

@@ -402,6 +402,25 @@ describe('thread repository semantics', () => {
     expect(pins.map((pin) => pin.message.content)).toEqual(['root', 'thread pin'])
   })
 
+  it('keeps pin order stable when two messages are pinned in the same millisecond', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.bulkAdd([
+      message({ id: 'first', content: 'first', createdAt: 10 }),
+      message({ id: 'second', content: 'second', createdAt: 20 }),
+    ])
+
+    // Both pins see the same Date.now() value — emulates rapid clicks or a
+    // future "pin all" flow. sortKey must still break the tie by insertion order.
+    vi.spyOn(Date, 'now').mockReturnValue(500)
+
+    await pinMessage('first')
+    await pinMessage('second')
+
+    const pins = await listPinnedMessagesForParentChat('parent-1')
+    expect(pins.map((pin) => pin.messageId)).toEqual(['first', 'second'])
+    expect(pins[0].sortKey).toBeLessThan(pins[1].sortKey)
+  })
+
   it('toggles a pinned message off and cleans pins when messages are deleted', async () => {
     await db.parentChats.add(parentChat())
     await db.messages.add(message({ id: 'root', content: 'root', createdAt: 10 }))

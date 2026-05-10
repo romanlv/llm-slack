@@ -28,6 +28,10 @@
   need a browser-like DOM.
 - Provider tests must use fakes or fixtures and must not call external provider
   APIs.
+- When mocking `Date.now()` to step a value across multiple operations, use a
+  single spy and call `mockReturnValue` between awaits. Do not chain
+  `mockReturnValueOnce(...)` — incidental Date.now() calls inside Dexie or
+  React internals consume queue slots and produce order-dependent flakes.
 
 ## Test Commands
 

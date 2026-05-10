@@ -415,6 +415,15 @@ export async function pinMessage(messageId: string) {
       }
 
       const now = Date.now()
+      // sortKey must be strictly monotonic per parent chat: two pins created in
+      // the same millisecond would otherwise tie, and Dexie's sortBy on equal
+      // keys leaves their relative order undefined.
+      const latestPin = await db.pinnedMessages
+        .where('parentChatId')
+        .equals(message.parentChatId)
+        .reverse()
+        .sortBy('sortKey')
+      const sortKey = Math.max(now, (latestPin[0]?.sortKey ?? 0) + 1)
       const pin: PinnedMessage = {
         id: crypto.randomUUID(),
         parentChatId: message.parentChatId,
@@ -422,7 +431,7 @@ export async function pinMessage(messageId: string) {
         conversationId: message.conversationId,
         messageId: message.id,
         pinnedAt: now,
-        sortKey: now,
+        sortKey,
       }
 
       await db.pinnedMessages.add(pin)
