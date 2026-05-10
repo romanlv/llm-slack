@@ -196,12 +196,42 @@ export async function deleteParentChat(parentChatId: string) {
   )
 }
 
-export async function countThreadsByParentChat(): Promise<Map<string, number>> {
+// A thread is "started" once its root message has at least one direct reply.
+// Empty threads (created by clicking "branch" but never sent into) are kept in
+// storage so the user can return to them via the same source message, but they
+// are not counted as branches for display.
+export async function countStartedBranchesByParentChat(): Promise<Map<string, number>> {
   const threads = await db.threads.toArray()
+  if (threads.length === 0) {
+    return new Map()
+  }
+
+  const rootIds = Array.from(new Set(threads.map((thread) => thread.rootMessageId)))
+  const rootRows = await db.messages.bulkGet(rootIds)
+  const replyCountByRootId = new Map<string, number>()
+  for (const row of rootRows) {
+    if (row) {
+      replyCountByRootId.set(row.id, row.directReplyCount)
+    }
+  }
+
   return threads.reduce((map, thread) => {
+    if ((replyCountByRootId.get(thread.rootMessageId) ?? 0) <= 0) {
+      return map
+    }
     map.set(thread.parentChatId, (map.get(thread.parentChatId) ?? 0) + 1)
     return map
   }, new Map<string, number>())
+}
+
+export async function countStartedBranchesForParentChat(parentChatId: string) {
+  const threads = await db.threads.where('parentChatId').equals(parentChatId).toArray()
+  if (threads.length === 0) {
+    return 0
+  }
+
+  const rootRows = await db.messages.bulkGet(threads.map((thread) => thread.rootMessageId))
+  return rootRows.filter((row) => row && row.directReplyCount > 0).length
 }
 
 export async function setParentChatModel(parentChatId: string, model: string) {
@@ -849,6 +879,53 @@ export async function deleteMessage(messageId: string) {
   if (owningThreadId) {
     await syncRootReplyCountForThread(owningThreadId)
   }
+}
+
+export async function deleteThread(threadId: string) {
+  const thread = await db.threads.get(threadId)
+  if (!thread) {
+    return
+  }
+
+  const threadIdsToDelete = new Set<string>()
+  const queue: string[] = [threadId]
+  while (queue.length > 0) {
+    const current = queue.shift() as string
+    if (threadIdsToDelete.has(current)) {
+      continue
+    }
+    threadIdsToDelete.add(current)
+
+    const children = await db.threads.where('parentThreadId').equals(current).toArray()
+    for (const child of children) {
+      queue.push(child.id)
+    }
+  }
+
+  const idsArray = [...threadIdsToDelete]
+
+  await db.transaction(
+    'rw',
+    [db.messages, db.threads, db.pinnedMessages, db.savedMessages],
+    async () => {
+      // Collect message ids first so saved-entry cleanup can use the indexed
+      // messageId path (savedMessages has no conversationId index).
+      const messageIds = (await db.messages
+        .where('conversationId')
+        .anyOf(idsArray)
+        .primaryKeys()) as string[]
+
+      if (messageIds.length > 0) {
+        await db.savedMessages.where('messageId').anyOf(messageIds).delete()
+      }
+      await db.pinnedMessages.where('conversationId').anyOf(idsArray).delete()
+      await db.messages.where('conversationId').anyOf(idsArray).delete()
+      await db.threads.bulkDelete(idsArray)
+      // The root message lives in the parent conversation and is preserved.
+      // Reset its reply count so the "N msgs" pill and branch counts update.
+      await db.messages.update(thread.rootMessageId, { directReplyCount: 0 })
+    },
+  )
 }
 
 export async function syncRootReplyCountForThread(threadId: string) {

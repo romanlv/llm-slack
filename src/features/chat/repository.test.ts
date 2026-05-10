@@ -5,11 +5,13 @@ import type { ChatMessage, ParentChat, PinnedMessage } from './domain'
 import { LlmSlackDatabase } from './database'
 import {
   archiveParentChat,
-  countThreadsByParentChat,
+  countStartedBranchesByParentChat,
+  countStartedBranchesForParentChat,
   createParentChat,
   db,
   deleteMessage,
   deleteParentChat,
+  deleteThread,
   editMessageContent,
   ensureSeedParentChat,
   findOrCreateEmptyParentChat,
@@ -720,7 +722,7 @@ describe('thread repository semantics', () => {
     expect(after?.starredAt).toBeUndefined()
   })
 
-  it('counts threads per parent chat, ignoring chats without threads', async () => {
+  it('counts only started branches (threads that have at least one message)', async () => {
     await db.parentChats.bulkAdd([
       parentChat({ id: 'parent-1' }),
       parentChat({ id: 'parent-2' }),
@@ -729,12 +731,73 @@ describe('thread repository semantics', () => {
     await db.messages.add(
       message({ id: 'root-2', conversationId: 'parent-1', createdAt: 2 }),
     )
-    await getOrCreateThreadForMessage('root-1')
+    const startedThread = await getOrCreateThreadForMessage('root-1')
     await getOrCreateThreadForMessage('root-2')
+    await db.messages.add(
+      message({
+        id: 'started-1',
+        conversationType: 'thread',
+        conversationId: startedThread.id,
+        createdAt: 3,
+      }),
+    )
+    await syncRootReplyCountForThread(startedThread.id)
 
-    const counts = await countThreadsByParentChat()
-    expect(counts.get('parent-1')).toBe(2)
+    const counts = await countStartedBranchesByParentChat()
+    expect(counts.get('parent-1')).toBe(1)
     expect(counts.get('parent-2')).toBeUndefined()
+    await expect(countStartedBranchesForParentChat('parent-1')).resolves.toBe(1)
+    await expect(countStartedBranchesForParentChat('parent-2')).resolves.toBe(0)
+  })
+
+  it('deletes a thread, its descendants, and resets the root reply count', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'root', content: 'root', createdAt: 10 }))
+    const thread = await getOrCreateThreadForMessage('root')
+    await db.messages.bulkAdd([
+      message({
+        id: 't1',
+        conversationType: 'thread',
+        conversationId: thread.id,
+        createdAt: 20,
+      }),
+      message({
+        id: 't2',
+        conversationType: 'thread',
+        conversationId: thread.id,
+        createdAt: 30,
+      }),
+    ])
+    const nested = await getOrCreateThreadForMessage('t2')
+    await db.messages.add(
+      message({
+        id: 'n1',
+        conversationType: 'thread',
+        conversationId: nested.id,
+        createdAt: 40,
+      }),
+    )
+    await syncRootReplyCountForThread(thread.id)
+    await syncRootReplyCountForThread(nested.id)
+    await pinMessage('t1')
+    await saveMessage('n1')
+
+    await deleteThread(thread.id)
+
+    await expect(db.threads.get(thread.id)).resolves.toBeUndefined()
+    await expect(db.threads.get(nested.id)).resolves.toBeUndefined()
+    await expect(db.messages.get('t1')).resolves.toBeUndefined()
+    await expect(db.messages.get('t2')).resolves.toBeUndefined()
+    await expect(db.messages.get('n1')).resolves.toBeUndefined()
+    await expect(db.pinnedMessages.count()).resolves.toBe(0)
+    await expect(db.savedMessages.count()).resolves.toBe(0)
+    // Root message lives in the parent conversation and is preserved.
+    await expect(db.messages.get('root')).resolves.toMatchObject({ directReplyCount: 0 })
+  })
+
+  it('is a no-op when deleting a missing thread', async () => {
+    await db.parentChats.add(parentChat())
+    await expect(deleteThread('missing-thread')).resolves.toBeUndefined()
   })
 
   it('migrates version 3 data by adding the starredAt index without losing rows', async () => {

@@ -25,8 +25,10 @@ import { Menu, MenuItem } from '@/components/ui/menu'
 import { MessageMarkdown } from '@/features/chat/components/message-markdown'
 import { sendParentChatTurn, sendThreadTurn } from '@/features/chat/send-turn'
 import {
+  countStartedBranchesForParentChat,
   db,
   deleteMessage,
+  deleteThread,
   editMessageContent,
   listPinnedMessagesForParentChat,
   getThreadAncestorChain,
@@ -771,6 +773,50 @@ function ConversationComposer({
   )
 }
 
+function ThreadActionsMenu({
+  disabled,
+  onDelete,
+}: {
+  disabled?: boolean
+  onDelete: () => void | Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <Menu
+      onOpenChange={setOpen}
+      open={open}
+      trigger={(triggerProps) => (
+        <button
+          aria-expanded={triggerProps['aria-expanded']}
+          aria-haspopup={triggerProps['aria-haspopup']}
+          aria-label="Branch actions"
+          className="rounded-xs border border-line px-2 font-mono text-meta leading-5 text-ink transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={disabled}
+          onClick={triggerProps.onClick}
+          ref={triggerProps.ref as RefCallback<HTMLButtonElement>}
+          type="button"
+        >
+          ⋯
+        </button>
+      )}
+    >
+      {({ close }) => (
+        <MenuItem
+          destructive
+          onSelect={() => {
+            void onDelete()
+            close()
+          }}
+        >
+          <Trash2 className="size-3.5" />
+          Delete branch
+        </MenuItem>
+      )}
+    </Menu>
+  )
+}
+
 function ChannelHeader({
   activeTab,
   branchCount,
@@ -1042,7 +1088,7 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
     new Set<string>(),
   )
   const branchCount = useLiveQuery(
-    () => db.threads.where('parentChatId').equals(chatId).count(),
+    () => countStartedBranchesForParentChat(chatId),
     [chatId],
     0,
   )
@@ -1375,10 +1421,38 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
               <h2 className="min-w-0 flex-1 truncate text-heading font-bold tracking-tight text-ink">
                 {branchLabel(rootMessage)}
               </h2>
-              <button className="rounded-xs border border-line px-2 font-mono text-meta leading-5 text-ink transition hover:bg-surface-muted" type="button">
-                ⋯
-              </button>
+              <ThreadActionsMenu
+                disabled={!activeThread}
+                onDelete={async () => {
+                  if (!activeThread) {
+                    return
+                  }
+
+                  const messageCount = threadMessages.length
+                  const confirmation =
+                    messageCount === 0
+                      ? 'Discard this empty branch?'
+                      : `Delete this branch and its ${messageCount} ${messageCount === 1 ? 'message' : 'messages'}? Nested branches are removed too.`
+                  if (!window.confirm(confirmation)) {
+                    return
+                  }
+
+                  setThreadError(null)
+                  try {
+                    await deleteThread(activeThread.id)
+                    await navigate({
+                      to: '/chat/$chatId',
+                      params: { chatId: parentChat.id },
+                    })
+                  } catch (error) {
+                    setThreadError(
+                      error instanceof Error ? error.message : 'Could not delete branch.',
+                    )
+                  }
+                }}
+              />
               <button
+                aria-label="Close branch"
                 className="rounded p-0.5 leading-none text-ink-muted transition hover:text-ink"
                 onClick={() =>
                   void navigate({

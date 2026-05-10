@@ -321,6 +321,37 @@ describe('ParentChatWorkspace', () => {
     expect(screen.getByText('still here')).toBeInTheDocument()
   })
 
+  it('deletes a branch from the thread header menu and returns to the parent chat', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'root', content: 'Root message', directReplyCount: 1 }))
+    await db.threads.add(thread({ id: 'thread-1', rootMessageId: 'root' }))
+    await db.messages.add(
+      message({
+        id: 'thread-message',
+        conversationType: 'thread',
+        conversationId: 'thread-1',
+        content: 'inside the branch',
+        createdAt: 2,
+      }),
+    )
+
+    render(<ParentChatWorkspace chatId="parent-1" threadId="thread-1" />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Branch actions' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /delete branch/i }))
+
+    await waitFor(async () => {
+      await expect(db.threads.get('thread-1')).resolves.toBeUndefined()
+      await expect(db.messages.get('thread-message')).resolves.toBeUndefined()
+    })
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/chat/$chatId',
+      params: { chatId: 'parent-1' },
+    })
+  })
+
   it('aborts deletion when the confirmation prompt is dismissed', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false)
     await db.parentChats.add(parentChat())

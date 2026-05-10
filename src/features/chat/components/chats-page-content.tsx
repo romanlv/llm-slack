@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router'
 import { Hash, MessagesSquare, Star } from 'lucide-react'
 
 import {
-  countThreadsByParentChat,
+  countStartedBranchesByParentChat,
   db,
   toggleStarParentChat,
   type ParentChat,
@@ -26,7 +26,7 @@ export function ChatsPageContent() {
     [] as ParentChat[],
   )
   const threadCountByParentChat = useLiveQuery(
-    () => countThreadsByParentChat(),
+    () => countStartedBranchesByParentChat(),
     [],
     new Map<string, number>(),
   )

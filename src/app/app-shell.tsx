@@ -23,7 +23,7 @@ import { Input } from '@/components/ui/input'
 import { Menu, MenuItem } from '@/components/ui/menu'
 import {
   archiveParentChat,
-  countThreadsByParentChat,
+  countStartedBranchesByParentChat,
   db,
   deleteParentChat,
   ensureSeedParentChat,
@@ -164,6 +164,18 @@ function ChatActionsMenu({
   )
 }
 
+function isThreadVisible(
+  thread: ConversationThread,
+  messagesById: Map<string, ChatMessage>,
+  activeThreadId?: string,
+) {
+  if (thread.id === activeThreadId) {
+    return true
+  }
+  const rootMessage = messagesById.get(thread.rootMessageId)
+  return Boolean(rootMessage && rootMessage.directReplyCount > 0)
+}
+
 function BranchTreeNode({
   activeThreadId,
   depth,
@@ -179,7 +191,9 @@ function BranchTreeNode({
   thread: ConversationThread
   threadsByParent: Map<string, ConversationThread[]>
 }) {
-  const children = threadsByParent.get(thread.id) ?? []
+  const children = (threadsByParent.get(thread.id) ?? []).filter((child) =>
+    isThreadVisible(child, messagesById, activeThreadId),
+  )
   const active = thread.id === activeThreadId
   const rootMessage = messagesById.get(thread.rootMessageId)
   const title = branchTitle(rootMessage)
@@ -246,7 +260,7 @@ export function AppShell() {
     [],
   )
   const threadCountByParentChat = useLiveQuery(
-    () => countThreadsByParentChat(),
+    () => countStartedBranchesByParentChat(),
     [],
     new Map<string, number>(),
   )
@@ -324,7 +338,10 @@ export function AppShell() {
       .filter((message): message is ChatMessage => Boolean(message))
       .map((message) => [message.id, message]),
   )
-  const rootThreads = activeThreads.filter((thread) => !thread.parentThreadId)
+  const rootThreads = activeThreads.filter(
+    (thread) =>
+      !thread.parentThreadId && isThreadVisible(thread, messagesById, activeThreadId),
+  )
   const threadsByParent = activeThreads.reduce(
     (map, thread) => {
       if (!thread.parentThreadId) {
