@@ -223,6 +223,80 @@ describe('ParentChatWorkspace', () => {
     expect(screen.queryByRole('menuitem', { name: /edit message/i })).not.toBeInTheDocument()
   })
 
+  it('pins and unpins a parent message from the message toolbar', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'm1', content: 'Pin me for later' }))
+
+    render(<ParentChatWorkspace chatId="parent-1" />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Pin message' }))
+
+    await waitFor(async () => {
+      await expect(db.pinnedMessages.where('messageId').equals('m1').count()).resolves.toBe(1)
+    })
+    await userEvent.click(screen.getByRole('button', { name: /pinned/i }))
+
+    expect(await screen.findByText('Pin me for later')).toBeInTheDocument()
+    await userEvent.click(screen.getByText('Pin me for later'))
+
+    expect(screen.getByRole('button', { name: 'Messages' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: /pinned/i }))
+    expect(screen.getByRole('button', { name: 'Unpin message' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: 'Unpin message' }))
+
+    await waitFor(async () => {
+      await expect(db.pinnedMessages.where('messageId').equals('m1').count()).resolves.toBe(0)
+    })
+    expect(await screen.findByText('No pinned messages in this channel yet.')).toBeInTheDocument()
+  })
+
+  it('shows thread pins in the root pinned tab and opens the source thread when selected', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'root', content: 'Root message' }))
+    await db.threads.add(thread({ id: 'thread-1', rootMessageId: 'root' }))
+    await db.messages.add(
+      message({
+        id: 'thread-message',
+        conversationType: 'thread',
+        conversationId: 'thread-1',
+        content: 'Thread pin',
+      }),
+    )
+
+    render(<ParentChatWorkspace chatId="parent-1" threadId="thread-1" />)
+
+    const pinButtons = await screen.findAllByRole('button', { name: 'Pin message' })
+    await userEvent.click(pinButtons[pinButtons.length - 1])
+
+    await waitFor(async () => {
+      await expect(db.pinnedMessages.where('messageId').equals('thread-message').count()).resolves.toBe(1)
+    })
+    expect(screen.queryByText('Pinned messages')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /pinned/i }))
+    await waitFor(() => {
+      expect(screen.getAllByText('Thread pin')).toHaveLength(2)
+    })
+
+    await userEvent.click(screen.getAllByText('Thread pin')[0])
+
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/chat/$chatId/thread/$threadId',
+      params: {
+        chatId: 'parent-1',
+        threadId: 'thread-1',
+      },
+    })
+  })
+
   it('deletes a confirmed message and removes it from the chat', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     await db.parentChats.add(parentChat())

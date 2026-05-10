@@ -8,6 +8,7 @@ import {
   type ConversationType,
   type MessageRole,
   type ParentChat,
+  type PinnedMessage,
   type ProviderUsage,
   type ThreadAncestor,
 } from '@/features/chat/domain'
@@ -22,11 +23,16 @@ export {
   type ConversationType,
   type MessageRole,
   type ParentChat,
+  type PinnedMessage,
   type ProviderUsage,
   type ThreadAncestor,
 }
 
 export { db }
+
+export type PinnedMessageWithMessage = PinnedMessage & {
+  message: ChatMessage
+}
 
 export async function createParentChat(input?: Partial<Pick<ParentChat, 'model' | 'title'>>) {
   const settings = await getSettings()
@@ -122,7 +128,7 @@ export async function deleteParentChat(parentChatId: string) {
   const threads = await db.threads.where('parentChatId').equals(parentChatId).toArray()
   const threadIds = threads.map((thread) => thread.id)
 
-  await db.transaction('rw', db.parentChats, db.threads, db.messages, async () => {
+  await db.transaction('rw', db.parentChats, db.threads, db.messages, db.pinnedMessages, async () => {
     if (threadIds.length > 0) {
       await db.messages
         .where('conversationId')
@@ -136,6 +142,7 @@ export async function deleteParentChat(parentChatId: string) {
       .delete()
 
     await db.threads.where('parentChatId').equals(parentChatId).delete()
+    await db.pinnedMessages.where('parentChatId').equals(parentChatId).delete()
     await db.parentChats.delete(parentChatId)
   })
 }
@@ -304,6 +311,125 @@ export async function failMessage(messageId: string, content: string, error: str
     content,
     error,
     status: 'error',
+  })
+}
+
+async function assertMessageConversationIsValid(message: ChatMessage) {
+  const parentChat = await db.parentChats.get(message.parentChatId)
+  if (!parentChat) {
+    throw new Error('Parent chat not found.')
+  }
+
+  if (message.conversationType === 'parent') {
+    if (message.conversationId !== message.parentChatId) {
+      throw new Error('Parent message has an invalid conversation.')
+    }
+    return
+  }
+
+  const thread = await db.threads.get(message.conversationId)
+  if (!thread || thread.parentChatId !== message.parentChatId) {
+    throw new Error('Thread message has an invalid conversation.')
+  }
+}
+
+export async function pinMessage(messageId: string) {
+  return db.transaction(
+    'rw',
+    db.parentChats,
+    db.threads,
+    db.messages,
+    db.pinnedMessages,
+    async () => {
+      const message = await db.messages.get(messageId)
+      if (!message) {
+        throw new Error('Message not found.')
+      }
+
+      await assertMessageConversationIsValid(message)
+
+      const existing = await db.pinnedMessages
+        .where('[conversationId+messageId]')
+        .equals([message.conversationId, message.id])
+        .first()
+
+      if (existing) {
+        return existing
+      }
+
+      const now = Date.now()
+      const pin: PinnedMessage = {
+        id: crypto.randomUUID(),
+        parentChatId: message.parentChatId,
+        conversationType: message.conversationType,
+        conversationId: message.conversationId,
+        messageId: message.id,
+        pinnedAt: now,
+        sortKey: now,
+      }
+
+      await db.pinnedMessages.add(pin)
+      return pin
+    },
+  )
+}
+
+export async function togglePinnedMessage(messageId: string) {
+  const message = await db.messages.get(messageId)
+  if (!message) {
+    throw new Error('Message not found.')
+  }
+
+  const existing = await db.pinnedMessages
+    .where('[conversationId+messageId]')
+    .equals([message.conversationId, message.id])
+    .first()
+
+  if (existing) {
+    await db.pinnedMessages.delete(existing.id)
+    return { pinned: false as const, pin: undefined }
+  }
+
+  const pin = await pinMessage(message.id)
+  return { pinned: true as const, pin }
+}
+
+export async function listPinnedMessagesForConversation(conversationId: string) {
+  const pins = await db.pinnedMessages
+    .where('[conversationId+sortKey]')
+    .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey])
+    .sortBy('sortKey')
+
+  return hydratePinnedMessages(pins)
+}
+
+export async function listPinnedMessagesForParentChat(parentChatId: string) {
+  const pins = await db.pinnedMessages.where('parentChatId').equals(parentChatId).sortBy('sortKey')
+
+  return hydratePinnedMessages(pins)
+}
+
+async function hydratePinnedMessages(pins: PinnedMessage[]) {
+  const messages = await db.messages.bulkGet(pins.map((pin) => pin.messageId))
+  const messagesById = new Map(
+    messages.filter((message): message is ChatMessage => Boolean(message)).map((message) => [
+      message.id,
+      message,
+    ]),
+  )
+
+  return pins.flatMap<PinnedMessageWithMessage>((pin) => {
+    const message = messagesById.get(pin.messageId)
+    if (
+      !message ||
+      message.parentChatId !== pin.parentChatId ||
+      message.conversationType !== pin.conversationType ||
+      message.conversationId !== pin.conversationId
+    ) {
+      return []
+    }
+
+    return [{ ...pin, message }]
   })
 }
 
@@ -511,9 +637,10 @@ export async function deleteMessage(messageId: string) {
   const owningThreadId =
     target.conversationType === 'thread' ? target.conversationId : undefined
 
-  await db.transaction('rw', db.messages, db.threads, async () => {
+  await db.transaction('rw', db.messages, db.threads, db.pinnedMessages, async () => {
     if (cascade.messageIds.length > 0) {
       await db.messages.bulkDelete(cascade.messageIds)
+      await db.pinnedMessages.where('messageId').anyOf(cascade.messageIds).delete()
     }
     if (cascade.threadIds.length > 0) {
       await db.threads.bulkDelete(cascade.threadIds)

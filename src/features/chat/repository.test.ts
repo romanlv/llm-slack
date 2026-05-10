@@ -1,6 +1,8 @@
+import Dexie from 'dexie'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ChatMessage, ParentChat } from './domain'
+import type { ChatMessage, ParentChat, PinnedMessage } from './domain'
+import { DeepchatDatabase } from './database'
 import {
   createParentChat,
   db,
@@ -10,7 +12,11 @@ import {
   findOrCreateEmptyParentChat,
   getOrCreateThreadForMessage,
   getThreadConversation,
+  listPinnedMessagesForConversation,
+  listPinnedMessagesForParentChat,
+  pinMessage,
   syncRootReplyCountForThread,
+  togglePinnedMessage,
 } from './repository'
 
 function parentChat(overrides: Partial<ParentChat> = {}): ParentChat {
@@ -260,13 +266,186 @@ describe('thread repository semantics', () => {
     ])
     const thread = await getOrCreateThreadForMessage('p1')
     await db.messages.add(message({ id: 't1', conversationType: 'thread', conversationId: thread.id }))
+    await pinMessage('p1')
+    await pinMessage('t1')
 
     await deleteParentChat('parent-1')
 
     await expect(db.parentChats.get('parent-1')).resolves.toBeUndefined()
     await expect(db.threads.where('parentChatId').equals('parent-1').count()).resolves.toBe(0)
     await expect(db.messages.where('parentChatId').equals('parent-1').count()).resolves.toBe(0)
+    await expect(db.pinnedMessages.where('parentChatId').equals('parent-1').count()).resolves.toBe(0)
     await expect(db.parentChats.get('parent-2')).resolves.toBeDefined()
     await expect(db.messages.get('p2')).resolves.toBeDefined()
+  })
+
+  it('pins messages idempotently inside their own conversation', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'p1', content: 'parent message', createdAt: 10 }))
+    const thread = await getOrCreateThreadForMessage('p1')
+    await db.messages.add(
+      message({
+        id: 't1',
+        conversationType: 'thread',
+        conversationId: thread.id,
+        content: 'thread message',
+        createdAt: 20,
+      }),
+    )
+
+    vi.spyOn(Date, 'now').mockReturnValue(1234)
+
+    const firstPin = await pinMessage('p1')
+    const secondPin = await pinMessage('p1')
+    const threadPin = await pinMessage('t1')
+
+    expect(secondPin.id).toBe(firstPin.id)
+    expect(firstPin).toMatchObject({
+      parentChatId: 'parent-1',
+      conversationType: 'parent',
+      conversationId: 'parent-1',
+      messageId: 'p1',
+      pinnedAt: 1234,
+      sortKey: 1234,
+    })
+    expect(threadPin).toMatchObject({
+      parentChatId: 'parent-1',
+      conversationType: 'thread',
+      conversationId: thread.id,
+      messageId: 't1',
+    })
+    await expect(db.pinnedMessages.count()).resolves.toBe(2)
+  })
+
+  it('lists pinned messages by conversation sort order and skips orphaned pins', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.bulkAdd([
+      message({ id: 'p1', content: 'first', createdAt: 10 }),
+      message({ id: 'p2', content: 'second', createdAt: 20 }),
+    ])
+    const orphan: PinnedMessage = {
+      id: 'orphan-pin',
+      parentChatId: 'parent-1',
+      conversationType: 'parent',
+      conversationId: 'parent-1',
+      messageId: 'missing-message',
+      pinnedAt: 5,
+      sortKey: 5,
+    }
+    await db.pinnedMessages.bulkAdd([
+      orphan,
+      {
+        id: 'pin-2',
+        parentChatId: 'parent-1',
+        conversationType: 'parent',
+        conversationId: 'parent-1',
+        messageId: 'p2',
+        pinnedAt: 20,
+        sortKey: 20,
+      },
+      {
+        id: 'pin-1',
+        parentChatId: 'parent-1',
+        conversationType: 'parent',
+        conversationId: 'parent-1',
+        messageId: 'p1',
+        pinnedAt: 10,
+        sortKey: 10,
+      },
+    ])
+
+    const pins = await listPinnedMessagesForConversation('parent-1')
+
+    expect(pins.map((pin) => pin.messageId)).toEqual(['p1', 'p2'])
+    expect(pins.map((pin) => pin.message.content)).toEqual(['first', 'second'])
+  })
+
+  it('lists pinned messages across every thread under a parent chat', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'root', content: 'root', createdAt: 10 }))
+    const thread = await getOrCreateThreadForMessage('root')
+    await db.messages.add(
+      message({
+        id: 'thread-message',
+        conversationType: 'thread',
+        conversationId: thread.id,
+        content: 'thread pin',
+        createdAt: 20,
+      }),
+    )
+
+    vi.spyOn(Date, 'now').mockReturnValueOnce(100).mockReturnValueOnce(200)
+
+    await pinMessage('root')
+    await pinMessage('thread-message')
+
+    const pins = await listPinnedMessagesForParentChat('parent-1')
+
+    expect(pins.map((pin) => pin.messageId)).toEqual(['root', 'thread-message'])
+    expect(pins.map((pin) => pin.message.content)).toEqual(['root', 'thread pin'])
+  })
+
+  it('toggles a pinned message off and cleans pins when messages are deleted', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'root', content: 'root', createdAt: 10 }))
+    const thread = await getOrCreateThreadForMessage('root')
+    await db.messages.add(
+      message({
+        id: 't1',
+        conversationType: 'thread',
+        conversationId: thread.id,
+        content: 'thread message',
+        createdAt: 20,
+      }),
+    )
+
+    await expect(togglePinnedMessage('root')).resolves.toMatchObject({ pinned: true })
+    await expect(togglePinnedMessage('root')).resolves.toMatchObject({ pinned: false })
+    await expect(db.pinnedMessages.count()).resolves.toBe(0)
+
+    await pinMessage('root')
+    await pinMessage('t1')
+    await deleteMessage('root')
+
+    await expect(db.messages.get('root')).resolves.toBeUndefined()
+    await expect(db.messages.get('t1')).resolves.toBeUndefined()
+    await expect(db.pinnedMessages.count()).resolves.toBe(0)
+  })
+
+  it('migrates version 1 data by adding the pinned messages table', async () => {
+    const databaseName = `deepchat-migration-${crypto.randomUUID()}`
+
+    const legacyDb = new Dexie(databaseName)
+    legacyDb.version(1).stores({
+      parentChats: 'id, createdAt, updatedAt, archivedAt',
+      threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+      messages:
+        'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+      settings: 'id',
+    })
+    await legacyDb.open()
+    await legacyDb.table('parentChats').add(parentChat())
+    await legacyDb.table('messages').add(message({ id: 'p1' }))
+    legacyDb.close()
+
+    const migratedDb = new DeepchatDatabase(databaseName)
+    await migratedDb.open()
+
+    await expect(migratedDb.parentChats.get('parent-1')).resolves.toBeDefined()
+    await expect(migratedDb.messages.get('p1')).resolves.toBeDefined()
+    await expect(migratedDb.pinnedMessages.count()).resolves.toBe(0)
+    await migratedDb.pinnedMessages.add({
+      id: 'pin-1',
+      parentChatId: 'parent-1',
+      conversationType: 'parent',
+      conversationId: 'parent-1',
+      messageId: 'p1',
+      pinnedAt: 10,
+      sortKey: 10,
+    })
+    await expect(migratedDb.pinnedMessages.count()).resolves.toBe(1)
+
+    migratedDb.close()
+    await migratedDb.delete()
   })
 })

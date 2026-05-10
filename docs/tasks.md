@@ -6,15 +6,15 @@
 - [x] edit message
 - [x] markdown support
 - [ ] saved messages (per-message bookmark + sidebar collection)
-- [ ] pinned messages (per-message pin)
+- [x] pinned messages (per-message pin)
 - [x] message actions menu (the per-message ⋯ button)
 - [x] copy message
 - [ ] retry failed assistant message
 - [ ] claude code oauth token provider
 - [ ] codex oauth token provider
-- [ ] onboarding - setup your name profile
 - [ ] free models from open router
 - [ ] pase images / upload files to chat
+- [ ] out of credits state
 
 # planned
 

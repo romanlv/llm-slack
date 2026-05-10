@@ -56,6 +56,18 @@ export interface ChatMessage {
   editedAt?: number
 }
 
+export interface PinnedMessage {
+  id: string
+  parentChatId: string
+  conversationType: ConversationType
+  conversationId: string
+  messageId: string
+  messageRevisionId?: string
+  pinnedAt: number
+  sortKey: number
+  note?: string
+}
+
 export interface ThreadAncestor {
   thread: ConversationThread
   rootMessage: ChatMessage

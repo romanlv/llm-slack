@@ -27,6 +27,7 @@ import {
   db,
   deleteMessage,
   editMessageContent,
+  listPinnedMessagesForParentChat,
   getThreadAncestorChain,
   getOrCreateThreadForMessage,
   getRootMessageForThread,
@@ -36,8 +37,10 @@ import {
   saveThreadDraft,
   setParentChatModel,
   setThreadModel,
+  togglePinnedMessage,
   type ChatMessage,
   type ConversationThread,
+  type PinnedMessageWithMessage,
   type ProviderUsage,
   type ThreadAncestor,
 } from '@/features/chat/repository'
@@ -55,6 +58,7 @@ type ParentChatWorkspaceProps = {
 }
 
 type ComposerTone = 'parent' | 'thread'
+type ParentTab = 'messages' | 'pinned'
 
 const AUTO_SCROLL_THRESHOLD_PX = 140
 
@@ -88,6 +92,10 @@ function branchLabel(message?: ChatMessage) {
 
   const text = previewText(message.content)
   return text.length > 34 ? `${text.slice(0, 31)}...` : text || 'Untitled branch'
+}
+
+function messageElementId(messageId: string) {
+  return `message-row-${messageId}`
 }
 
 function authorLabel(message: ChatMessage, userName: string) {
@@ -317,20 +325,27 @@ function MessageEditor({
 function MessageBlock({
   active,
   compact,
+  isPinned,
   message,
   onOpenThread,
+  onSelect,
+  onTogglePin,
   avatarDataUrl,
   userName,
 }: {
   active?: boolean
   compact?: boolean
+  isPinned: boolean
   message: ChatMessage
   onOpenThread: (messageId: string) => void
+  onSelect?: () => void
+  onTogglePin: (messageId: string) => Promise<void>
   avatarDataUrl?: string
   userName: string
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [pinning, setPinning] = useState(false)
   const replyCount = message.directReplyCount
   const hasReplies = replyCount > 0
   const isError = message.status === 'error'
@@ -347,13 +362,50 @@ function MessageBlock({
     await deleteMessage(message.id)
   }
 
+  const handleTogglePin = async () => {
+    if (pinning) {
+      return
+    }
+
+    setPinning(true)
+    try {
+      await onTogglePin(message.id)
+    } finally {
+      setPinning(false)
+    }
+  }
+
+  const handleSelect = (eventTarget: EventTarget | null) => {
+    if (!onSelect || !(eventTarget instanceof Element)) {
+      return
+    }
+
+    if (eventTarget.closest('a, button, input, textarea, select, [role="menuitem"]')) {
+      return
+    }
+
+    onSelect()
+  }
+
   return (
     <article
       className={cn(
         'group relative flex gap-3 px-5 py-1.5 transition hover:bg-surface-hover',
         active ? 'border-l-2 border-pin bg-pin-bg' : 'border-l-2 border-transparent',
         compact ? 'px-4' : '',
+        onSelect ? 'cursor-pointer' : '',
       )}
+      id={messageElementId(message.id)}
+      onClick={(event) => handleSelect(event.target)}
+      onKeyDown={(event) => {
+        if (!onSelect || (event.key !== 'Enter' && event.key !== ' ')) {
+          return
+        }
+
+        event.preventDefault()
+        onSelect()
+      }}
+      tabIndex={onSelect ? 0 : undefined}
     >
       <Avatar avatarDataUrl={avatarDataUrl} message={message} userName={userName} />
       <div className="min-w-0 max-w-full flex-1 overflow-hidden">
@@ -378,6 +430,12 @@ function MessageBlock({
           ) : null}
           {message.editedAt ? (
             <span className="font-mono text-meta text-ink-dim">(edited)</span>
+          ) : null}
+          {isPinned ? (
+            <span className="inline-flex items-center gap-1 font-mono text-meta font-bold text-pin">
+              <Pin className="size-3" />
+              pinned
+            </span>
           ) : null}
         </div>
 
@@ -424,10 +482,27 @@ function MessageBlock({
           <GitBranch className="size-3" />
           branch
         </button>
-        <button className="border-r border-line px-2 py-1 font-mono text-pill text-ink-muted transition hover:bg-surface-muted" type="button">
+        <button
+          aria-label="Save message"
+          className="border-r border-line px-2 py-1 font-mono text-pill text-ink-muted opacity-50"
+          disabled
+          title="Saved messages are not implemented yet."
+          type="button"
+        >
           <Bookmark className="size-3" />
         </button>
-        <button className="border-r border-line px-2 py-1 font-mono text-pill text-ink-muted transition hover:bg-surface-muted" type="button">
+        <button
+          aria-label={isPinned ? 'Unpin message' : 'Pin message'}
+          aria-pressed={isPinned}
+          className={cn(
+            'border-r border-line px-2 py-1 font-mono text-pill transition hover:bg-pin-bg disabled:cursor-not-allowed disabled:opacity-60',
+            isPinned ? 'bg-pin-bg text-pin' : 'text-ink-muted',
+          )}
+          disabled={pinning}
+          onClick={() => void handleTogglePin()}
+          title={isPinned ? 'Unpin message' : 'Pin message'}
+          type="button"
+        >
           <Pin className="size-3" />
         </button>
         <Menu
@@ -663,16 +738,30 @@ function ConversationComposer({
 }
 
 function ChannelHeader({
+  activeTab,
   branchCount,
   messageCount,
   onRename,
+  onTabChange,
+  pinnedCount,
   title,
 }: {
+  activeTab: ParentTab
   branchCount: number
   messageCount: number
   onRename: (title: string) => void
+  onTabChange: (tab: ParentTab) => void
+  pinnedCount: number
   title: string
 }) {
+  const tabClassName = (tab: ParentTab) =>
+    cn(
+      '-mb-px border-b-2 px-2.5 pt-1.5 pb-2 text-tab font-semibold',
+      activeTab === tab
+        ? 'border-accent text-ink'
+        : 'border-transparent text-ink-muted hover:text-ink',
+    )
+
   return (
     <header className="border-b border-line bg-surface">
       <div className="flex items-center gap-2.5 px-5 pb-1.5 pt-2.5">
@@ -701,19 +790,39 @@ function ChannelHeader({
         </button>
       </div>
       <nav className="flex items-center gap-0.5 px-3.5">
-        <button className="-mb-px border-b-2 border-accent px-2.5 pt-1.5 pb-2 text-tab font-semibold text-ink" type="button">
+        <button
+          aria-pressed={activeTab === 'messages'}
+          className={tabClassName('messages')}
+          onClick={() => onTabChange('messages')}
+          type="button"
+        >
           Messages
         </button>
-        <button className="inline-flex items-center gap-1.5 px-2.5 pt-1.5 pb-2 text-tab font-medium text-ink-muted hover:text-ink" type="button">
+        <button
+          aria-pressed={activeTab === 'pinned'}
+          className={cn(tabClassName('pinned'), 'inline-flex items-center gap-1.5')}
+          onClick={() => onTabChange('pinned')}
+          type="button"
+        >
           <Pin className="size-3" />
-          Pinned <span className="rounded-full border border-line bg-surface-muted px-1.5 font-mono text-meta font-semibold text-ink-muted">2</span>
+          Pinned <span className="rounded-full border border-line bg-surface-muted px-1.5 font-mono text-meta font-semibold text-ink-muted">{pinnedCount}</span>
         </button>
-        <button className="inline-flex items-center gap-1.5 px-2.5 pt-1.5 pb-2 text-tab font-medium text-ink-muted hover:text-ink" type="button">
+        <button
+          aria-disabled="true"
+          className="inline-flex items-center gap-1.5 px-2.5 pt-1.5 pb-2 text-tab font-medium text-ink-muted opacity-60"
+          disabled
+          type="button"
+        >
           <Bookmark className="size-3" />
-          Saved <span className="rounded-full border border-line bg-surface-muted px-1.5 font-mono text-meta font-semibold text-ink-muted">1</span>
+          Saved
         </button>
-        <button className="px-2.5 pt-1.5 pb-2 text-tab font-medium text-ink-muted hover:text-ink" type="button">
-          Files <span className="ml-1 rounded-full border border-line bg-surface-muted px-1.5 font-mono text-meta font-semibold text-ink-muted">4</span>
+        <button
+          aria-disabled="true"
+          className="px-2.5 pt-1.5 pb-2 text-tab font-medium text-ink-muted opacity-60"
+          disabled
+          type="button"
+        >
+          Files
         </button>
       </nav>
     </header>
@@ -839,6 +948,8 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
   const [threadError, setThreadError] = useState<string | null>(null)
   const [sendingParent, setSendingParent] = useState(false)
   const [sendingThreadId, setSendingThreadId] = useState<string | null>(null)
+  const [parentTab, setParentTab] = useState<ParentTab>('messages')
+  const pendingMessageJumpRef = useRef<string | null>(null)
 
   const parentChat = useLiveQuery(() => db.parentChats.get(chatId), [chatId], undefined)
   const settings = useLiveQuery(() => getSettings(), [], undefined)
@@ -850,6 +961,11 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
         .sortBy('createdAt'),
     [chatId],
     [] as ChatMessage[],
+  )
+  const parentPinnedMessages = useLiveQuery(
+    () => listPinnedMessagesForParentChat(chatId),
+    [chatId],
+    [] as PinnedMessageWithMessage[],
   )
   const branchCount = useLiveQuery(
     () => db.threads.where('parentChatId').equals(chatId).count(),
@@ -888,6 +1004,9 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
   const parentScrollContentKey = parentMessages
     .map((message) => `${message.id}:${message.content.length}:${message.status}`)
     .join('|')
+  const parentPinnedScrollContentKey = parentPinnedMessages
+    .map((pin) => `${pin.id}:${pin.message.id}:${pin.message.content.length}:${pin.message.status}`)
+    .join('|')
   const threadScrollContentKey = threadMessages
     .map((message) => `${message.id}:${message.content.length}:${message.status}`)
     .join('|')
@@ -895,6 +1014,44 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
   const threadUsage = latestProviderUsage(threadMessages)
   const userName = settings?.userName ?? DEFAULT_USER_NAME
   const avatarDataUrl = settings?.avatarDataUrl
+  const parentPinnedMessageIds = new Set(parentPinnedMessages.map((pin) => pin.messageId))
+  const threadPinnedMessageIds = new Set(
+    parentPinnedMessages
+      .filter((pin) => pin.conversationId === threadId)
+      .map((pin) => pin.messageId),
+  )
+  const parentScrollContentKeyForActiveTab =
+    parentTab === 'pinned' ? parentPinnedScrollContentKey : parentScrollContentKey
+
+  function jumpToMessage(messageId: string) {
+    const element = document.getElementById(messageElementId(messageId))
+    if (typeof element?.scrollIntoView !== 'function') {
+      return
+    }
+
+    element.scrollIntoView({
+      block: 'center',
+      behavior: 'smooth',
+    })
+  }
+
+  useLayoutEffect(() => {
+    const pendingMessageId = pendingMessageJumpRef.current
+    if (!pendingMessageId) {
+      return
+    }
+
+    const messageIsVisible =
+      parentMessages.some((message) => message.id === pendingMessageId) ||
+      threadMessages.some((message) => message.id === pendingMessageId)
+
+    if (!messageIsVisible) {
+      return
+    }
+
+    pendingMessageJumpRef.current = null
+    window.requestAnimationFrame(() => jumpToMessage(pendingMessageId))
+  }, [parentMessages, threadMessages])
 
   if (!parentChat) {
     return (
@@ -920,6 +1077,45 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
         threadId: thread.id,
       },
     })
+  }
+
+  const openPinnedMessage = async (pin: PinnedMessageWithMessage) => {
+    pendingMessageJumpRef.current = pin.messageId
+    setParentTab('messages')
+
+    if (pin.conversationType === 'thread') {
+      await navigate({
+        to: '/chat/$chatId/thread/$threadId',
+        params: {
+          chatId: parentChat.id,
+          threadId: pin.conversationId,
+        },
+      })
+      return
+    }
+
+    await navigate({
+      to: '/chat/$chatId',
+      params: { chatId: parentChat.id },
+    })
+  }
+
+  const toggleParentPin = async (messageId: string) => {
+    setParentError(null)
+    try {
+      await togglePinnedMessage(messageId)
+    } catch (error) {
+      setParentError(error instanceof Error ? error.message : 'Could not update pinned message.')
+    }
+  }
+
+  const toggleThreadPin = async (messageId: string) => {
+    setThreadError(null)
+    try {
+      await togglePinnedMessage(messageId)
+    } catch (error) {
+      setThreadError(error instanceof Error ? error.message : 'Could not update pinned message.')
+    }
   }
 
   const handleParentSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -977,9 +1173,12 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
     >
       <section className={cn('min-w-0 grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto]', threadId ? 'hidden xl:grid' : '')}>
         <ChannelHeader
+          activeTab={parentTab}
           branchCount={branchCount}
           messageCount={parentMessages.length}
           onRename={(title) => void renameParentChat(parentChat.id, title)}
+          onTabChange={setParentTab}
+          pinnedCount={parentPinnedMessages.length}
           title={parentChat.title}
         />
         <LineageBar
@@ -991,8 +1190,8 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
 
         <SmartMessageScrollPane
           className="row-start-3 min-h-0 overflow-y-auto bg-white py-2"
-          contentKey={parentScrollContentKey}
-          resetKey={chatId}
+          contentKey={parentScrollContentKeyForActiveTab}
+          resetKey={`${chatId}:${parentTab}`}
         >
           {parentChat.archivedAt ? (
             <EmptyState>This parent chat is archived. Restore it from the sidebar to continue.</EmptyState>
@@ -1000,7 +1199,25 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
 
           {parentError ? <EmptyState>{parentError}</EmptyState> : null}
 
-          {parentMessages.length === 0 ? (
+          {parentTab === 'pinned' ? (
+            parentPinnedMessages.length === 0 ? (
+              <EmptyState>No pinned messages in this channel yet.</EmptyState>
+            ) : (
+              parentPinnedMessages.map((pin) => (
+                <MessageBlock
+                  active
+                  avatarDataUrl={avatarDataUrl}
+                  isPinned
+                  key={pin.id}
+                  message={pin.message}
+                  onOpenThread={(messageId) => void openThreadForMessage(messageId)}
+                  onSelect={() => void openPinnedMessage(pin)}
+                  onTogglePin={toggleParentPin}
+                  userName={userName}
+                />
+              ))
+            )
+          ) : parentMessages.length === 0 ? (
             <EmptyState>
               This channel is empty. Send a top-level message, then use the branch action on any message to fork the conversation.
             </EmptyState>
@@ -1008,9 +1225,12 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
             parentMessages.map((message) => (
               <MessageBlock
                 avatarDataUrl={avatarDataUrl}
+                active={parentPinnedMessageIds.has(message.id)}
+                isPinned={parentPinnedMessageIds.has(message.id)}
                 key={message.id}
                 message={message}
                 onOpenThread={(messageId) => void openThreadForMessage(messageId)}
+                onTogglePin={toggleParentPin}
                 userName={userName}
               />
             ))
@@ -1084,10 +1304,13 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
               threadMessages.map((message) => (
                 <MessageBlock
                   avatarDataUrl={avatarDataUrl}
+                  active={threadPinnedMessageIds.has(message.id)}
                   compact
+                  isPinned={threadPinnedMessageIds.has(message.id)}
                   key={message.id}
                   message={message}
                   onOpenThread={(messageId) => void openThreadForMessage(messageId)}
+                  onTogglePin={toggleThreadPin}
                   userName={userName}
                 />
               ))
