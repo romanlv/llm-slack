@@ -1,7 +1,7 @@
 
 # next
 - [ ] user profile/user name
-- [ ] delete chat
+- [x] delete chat
 - [x] delete message
 - [x] edit message
 - [ ] markdown support

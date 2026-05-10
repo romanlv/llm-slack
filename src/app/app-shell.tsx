@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useState } from 'react'
+import type { RefCallback } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 import {
@@ -9,17 +10,21 @@ import {
   Hash,
   KeyRound,
   MessageSquarePlus,
+  MoreHorizontal,
   Search,
   Settings2,
+  Trash2,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Menu, MenuItem } from '@/components/ui/menu'
 import {
   archiveParentChat,
-  createParentChat,
   db,
+  deleteParentChat,
   ensureSeedParentChat,
+  findOrCreateEmptyParentChat,
   previewText,
   restoreParentChat,
   type ChatMessage,
@@ -61,6 +66,81 @@ function branchTitle(rootMessage?: ChatMessage) {
 
   const text = previewText(rootMessage.content)
   return text.length > 32 ? `${text.slice(0, 29)}...` : text || 'Untitled branch'
+}
+
+function ChatActionsMenu({
+  archived,
+  onDelete,
+  parentChat,
+}: {
+  archived?: boolean
+  onDelete: () => void
+  parentChat: ParentChat
+}) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <Menu
+      onOpenChange={setOpen}
+      open={open}
+      trigger={(triggerProps) => (
+        <button
+          aria-expanded={triggerProps['aria-expanded']}
+          aria-haspopup={triggerProps['aria-haspopup']}
+          aria-label={`Actions for ${parentChat.title}`}
+          className={cn(
+            'rounded p-0.5 text-sidebar-fg-muted transition hover:bg-white/15 hover:text-white',
+            open ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+          )}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            triggerProps.onClick()
+          }}
+          ref={triggerProps.ref as RefCallback<HTMLButtonElement>}
+          type="button"
+        >
+          <MoreHorizontal className="size-3.5" />
+        </button>
+      )}
+    >
+      {({ close }) => (
+        <>
+          {archived ? (
+            <MenuItem
+              onSelect={() => {
+                void restoreParentChat(parentChat.id)
+                close()
+              }}
+            >
+              <ArchiveRestore className="size-3.5 text-ink-muted" />
+              Restore chat
+            </MenuItem>
+          ) : (
+            <MenuItem
+              onSelect={() => {
+                void archiveParentChat(parentChat.id)
+                close()
+              }}
+            >
+              <Archive className="size-3.5 text-ink-muted" />
+              Archive chat
+            </MenuItem>
+          )}
+          <MenuItem
+            destructive
+            onSelect={() => {
+              onDelete()
+              close()
+            }}
+          >
+            <Trash2 className="size-3.5" />
+            Delete chat
+          </MenuItem>
+        </>
+      )}
+    </Menu>
+  )
 }
 
 function BranchTreeNode({
@@ -173,11 +253,26 @@ export function AppShell() {
   }, [settings?.theme])
 
   const handleNewParentChat = async () => {
-    const parentChat = await createParentChat()
+    const parentChat = await findOrCreateEmptyParentChat()
     await navigate({
       to: '/chat/$chatId',
       params: { chatId: parentChat.id },
     })
+  }
+
+  const handleDeleteParentChat = async (parentChat: ParentChat) => {
+    const confirmed = window.confirm(
+      `Delete "${parentChat.title}"? All messages and branches will be removed.`,
+    )
+    if (!confirmed) {
+      return
+    }
+
+    const wasActive = activeChatId === parentChat.id
+    await deleteParentChat(parentChat.id)
+    if (wasActive) {
+      await navigate({ to: '/' })
+    }
   }
 
   const visibleParentChats = parentChats.filter((chat) =>
@@ -259,23 +354,31 @@ export function AppShell() {
                   location.pathname.startsWith(`/chat/${parentChat.id}/thread/`)
 
                 return (
-                  <Link
+                  <div
                     className={cn(
-                      'flex items-center gap-2 px-4 py-1 text-body transition',
+                      'group flex items-center gap-2 px-4 py-1 text-body transition',
                       active
                         ? 'bg-sidebar-active font-semibold text-white'
                         : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
                     )}
                     key={parentChat.id}
-                    params={{ chatId: parentChat.id }}
-                    to="/chat/$chatId"
                   >
-                    <Hash className="size-3.5 shrink-0 text-sidebar-fg-dim" />
-                    <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
-                    <span className="font-mono text-meta text-sidebar-chip">
-                      {formatUpdatedAt(parentChat.updatedAt)}
-                    </span>
-                  </Link>
+                    <Link
+                      className="flex min-w-0 flex-1 items-center gap-2"
+                      params={{ chatId: parentChat.id }}
+                      to="/chat/$chatId"
+                    >
+                      <Hash className="size-3.5 shrink-0 text-sidebar-fg-dim" />
+                      <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
+                      <span className="font-mono text-meta text-sidebar-chip">
+                        {formatUpdatedAt(parentChat.updatedAt)}
+                      </span>
+                    </Link>
+                    <ChatActionsMenu
+                      onDelete={() => void handleDeleteParentChat(parentChat)}
+                      parentChat={parentChat}
+                    />
+                  </div>
                 )
               })}
             </section>
@@ -337,13 +440,10 @@ export function AppShell() {
                   >
                     # {parentChat.title}
                   </Link>
-                  <button
-                    className="opacity-0 transition hover:text-white group-hover:opacity-100"
-                    onClick={() => void archiveParentChat(parentChat.id)}
-                    type="button"
-                  >
-                    <Archive className="size-3.5" />
-                  </button>
+                  <ChatActionsMenu
+                    onDelete={() => void handleDeleteParentChat(parentChat)}
+                    parentChat={parentChat}
+                  />
                 </div>
               ))}
             </section>
@@ -357,15 +457,18 @@ export function AppShell() {
                   <div className="px-4 py-2 text-meta text-sidebar-fg-dim">No archived chats.</div>
                 ) : (
                   archivedParentChats.map((parentChat) => (
-                    <button
-                      className="flex w-full items-center gap-2 px-4 py-1 text-left text-body text-sidebar-fg transition hover:bg-sidebar-hover hover:text-white"
+                    <div
+                      className="group flex items-center gap-2 px-4 py-1 text-body text-sidebar-fg transition hover:bg-sidebar-hover hover:text-white"
                       key={parentChat.id}
-                      onClick={() => void restoreParentChat(parentChat.id)}
-                      type="button"
                     >
-                      <ArchiveRestore className="size-3.5" />
+                      <ArchiveRestore className="size-3.5 shrink-0" />
                       <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
-                    </button>
+                      <ChatActionsMenu
+                        archived
+                        onDelete={() => void handleDeleteParentChat(parentChat)}
+                        parentChat={parentChat}
+                      />
+                    </div>
                   ))
                 )}
               </section>

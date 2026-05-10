@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { ChatMessage, ParentChat } from './domain'
 import {
+  createParentChat,
   db,
   deleteMessage,
   deleteParentChat,
   editMessageContent,
+  findOrCreateEmptyParentChat,
   getOrCreateThreadForMessage,
   getThreadConversation,
   syncRootReplyCountForThread,
@@ -220,6 +222,34 @@ describe('thread repository semantics', () => {
     await expect(db.messages.get('t1')).resolves.toBeUndefined()
     await expect(db.messages.get('root')).resolves.toMatchObject({ directReplyCount: 1 })
     await expect(db.threads.get(thread.id)).resolves.toBeDefined()
+  })
+
+  it('returns the most recent empty non-archived parent chat instead of creating another', async () => {
+    await db.parentChats.bulkAdd([
+      parentChat({ id: 'with-msgs', title: 'Has messages', updatedAt: 5 }),
+      parentChat({ id: 'empty-old', title: 'Empty old', updatedAt: 10 }),
+      parentChat({ id: 'empty-new', title: 'Empty new', updatedAt: 20 }),
+      parentChat({ id: 'empty-archived', title: 'Empty archived', archivedAt: 1, updatedAt: 30 }),
+    ])
+    await db.messages.add(message({ id: 'm1', conversationId: 'with-msgs', parentChatId: 'with-msgs' }))
+
+    const reused = await findOrCreateEmptyParentChat()
+
+    expect(reused.id).toBe('empty-new')
+    await expect(db.parentChats.count()).resolves.toBe(4)
+  })
+
+  it('creates a new parent chat when no empty non-archived chat exists', async () => {
+    await createParentChat({ title: 'Filled' })
+    const filled = (await db.parentChats.toArray())[0]
+    await db.messages.add(
+      message({ id: 'm1', conversationId: filled.id, parentChatId: filled.id }),
+    )
+
+    const created = await findOrCreateEmptyParentChat()
+
+    expect(created.id).not.toBe(filled.id)
+    await expect(db.parentChats.count()).resolves.toBe(2)
   })
 
   it('deletes a parent chat with all owned threads and messages in one cascade', async () => {

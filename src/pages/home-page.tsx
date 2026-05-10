@@ -3,7 +3,7 @@ import { Database, GitBranch, Layers3 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { createParentChat } from '@/features/chat/repository'
+import { findOrCreateEmptyParentChat } from '@/features/chat/repository'
 
 const pillars = [
   {
@@ -27,7 +27,7 @@ export function HomePage() {
   const navigate = useNavigate()
 
   const handleStart = async () => {
-    const parentChat = await createParentChat()
+    const parentChat = await findOrCreateEmptyParentChat()
     await navigate({
       to: '/chat/$chatId',
       params: { chatId: parentChat.id },

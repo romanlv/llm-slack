@@ -45,6 +45,28 @@ export async function createParentChat(input?: Partial<Pick<ParentChat, 'model' 
   return chat
 }
 
+export async function findOrCreateEmptyParentChat() {
+  const chats = await db.parentChats.orderBy('updatedAt').reverse().toArray()
+
+  for (const chat of chats) {
+    if (chat.archivedAt) {
+      continue
+    }
+
+    const count = await db.messages
+      .where('[conversationId+createdAt]')
+      .between([chat.id, Dexie.minKey], [chat.id, Dexie.maxKey])
+      .filter((message) => message.conversationType === 'parent')
+      .count()
+
+    if (count === 0) {
+      return chat
+    }
+  }
+
+  return createParentChat()
+}
+
 export async function ensureSeedParentChat() {
   const count = await db.parentChats.count()
   if (count > 0) {
