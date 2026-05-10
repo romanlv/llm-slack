@@ -22,7 +22,7 @@ describe('send turn lifecycle', () => {
     await archiveParentChat(parentChat.id)
 
     await expect(sendParentChatTurn(parentChat.id, 'hello')).rejects.toThrow(
-      'Archived parent chats cannot accept new sends.',
+      'Archived conversations cannot accept new sends.',
     )
 
     expect(mockedSendOpenRouterChat).not.toHaveBeenCalled()
@@ -49,7 +49,7 @@ describe('send turn lifecycle', () => {
     await archiveParentChat(parentChat.id)
 
     await expect(sendThreadTurn(thread.id, 'hello')).rejects.toThrow(
-      'Archived parent chats cannot accept new sends.',
+      'Archived conversations cannot accept new sends.',
     )
 
     expect(mockedSendOpenRouterChat).not.toHaveBeenCalled()

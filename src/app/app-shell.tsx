@@ -13,6 +13,8 @@ import {
   MoreHorizontal,
   Search,
   Settings2,
+  Star,
+  StarOff,
   Trash2,
 } from 'lucide-react'
 
@@ -21,12 +23,14 @@ import { Input } from '@/components/ui/input'
 import { Menu, MenuItem } from '@/components/ui/menu'
 import {
   archiveParentChat,
+  countThreadsByParentChat,
   db,
   deleteParentChat,
   ensureSeedParentChat,
   findOrCreateEmptyParentChat,
   previewText,
   restoreParentChat,
+  toggleStarParentChat,
   type ChatMessage,
   type ConversationThread,
   type ParentChat,
@@ -37,13 +41,6 @@ import {
   userInitials,
 } from '@/features/settings/settings-repository'
 import { cn } from '@/lib/utils'
-
-function formatUpdatedAt(timestamp: number) {
-  return new Intl.DateTimeFormat('en', {
-    month: 'short',
-    day: 'numeric',
-  }).format(timestamp)
-}
 
 function matchesSearch(parentChat: ParentChat, query: string) {
   if (!query) {
@@ -110,6 +107,26 @@ function ChatActionsMenu({
     >
       {({ close }) => (
         <>
+          {!archived ? (
+            <MenuItem
+              onSelect={() => {
+                void toggleStarParentChat(parentChat.id)
+                close()
+              }}
+            >
+              {parentChat.starredAt ? (
+                <>
+                  <StarOff className="size-3.5 text-ink-muted" />
+                  Unstar chat
+                </>
+              ) : (
+                <>
+                  <Star className="size-3.5 text-ink-muted" />
+                  Star chat
+                </>
+              )}
+            </MenuItem>
+          ) : null}
           {archived ? (
             <MenuItem
               onSelect={() => {
@@ -171,30 +188,30 @@ function BranchTreeNode({
     <>
       <Link
         className={cn(
-          'group relative flex items-center gap-2 px-3 py-1.5 text-tab transition',
+          'group relative mx-2 flex items-center gap-2 rounded-md px-2 py-1.5 text-tab transition',
           active
-            ? 'bg-sidebar-active font-semibold text-white'
+            ? 'bg-sidebar-active font-semibold text-sidebar-active-fg'
             : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
         )}
         params={{ chatId: parentChatId, threadId: thread.id }}
-        style={{ paddingLeft: `${18 + depth * 18}px` }}
+        style={{ paddingLeft: `${10 + depth * 18}px` }}
         to="/chat/$chatId/thread/$threadId"
       >
         {depth > 0 ? (
           <>
             <span
               className="absolute bottom-1/2 top-0 w-px bg-sidebar-line"
-              style={{ left: `${16 + (depth - 1) * 18}px` }}
+              style={{ left: `${8 + (depth - 1) * 18}px` }}
             />
             <span
               className="absolute top-1/2 h-px w-3 bg-sidebar-line"
-              style={{ left: `${16 + (depth - 1) * 18}px` }}
+              style={{ left: `${8 + (depth - 1) * 18}px` }}
             />
           </>
         ) : null}
-        <GitBranch className={cn('size-3.5 shrink-0', active ? 'text-white' : 'text-sidebar-chip')} />
+        <GitBranch className={cn('size-3.5 shrink-0', active ? 'text-sidebar-active-fg' : 'text-sidebar-chip')} />
         <span className="min-w-0 flex-1 truncate">{title}</span>
-        <span className={cn('font-mono text-meta', active ? 'text-white/80' : 'text-sidebar-fg-dim')}>
+        <span className={cn('font-mono text-meta', active ? 'text-sidebar-active-fg/80' : 'text-sidebar-fg-dim')}>
           {rootMessage?.directReplyCount || 'new'}
         </span>
       </Link>
@@ -227,6 +244,11 @@ export function AppShell() {
     () => db.parentChats.orderBy('updatedAt').reverse().toArray(),
     [],
     [],
+  )
+  const threadCountByParentChat = useLiveQuery(
+    () => countThreadsByParentChat(),
+    [],
+    new Map<string, number>(),
   )
   const activeThreads = useLiveQuery(
     () =>
@@ -285,6 +307,13 @@ export function AppShell() {
   )
   const activeParentChats = visibleParentChats.filter((chat) => !chat.archivedAt)
   const archivedParentChats = visibleParentChats.filter((chat) => Boolean(chat.archivedAt))
+  const starredParentChats = activeParentChats
+    .filter((chat) => Boolean(chat.starredAt))
+    .sort((a, b) => (b.starredAt ?? 0) - (a.starredAt ?? 0))
+  const recentParentChats = activeParentChats.filter((chat) => !chat.starredAt)
+  const RECENT_LIMIT = 8
+  const visibleRecentParentChats = recentParentChats.slice(0, RECENT_LIMIT)
+  const hasMoreRecent = recentParentChats.length > RECENT_LIMIT
   const activeParentChat = activeChatId
     ? parentChats.find((chat) => chat.id === activeChatId)
     : undefined
@@ -317,7 +346,7 @@ export function AppShell() {
           <div className="border-b border-sidebar-line px-4 py-3">
             <div className="flex items-center gap-2">
               <div className="min-w-0 flex-1 truncate text-title font-bold tracking-tight text-white">
-                Deepchat
+                llm-slack
               </div>
               <Link
                 className="rounded-md p-1.5 text-sidebar-fg-muted transition hover:bg-sidebar-hover hover:text-white"
@@ -345,7 +374,7 @@ export function AppShell() {
             <div className="px-2">
               <Link
                 className={cn(
-                  'flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-body font-medium text-white transition hover:bg-sidebar-hover',
+                  'flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-body font-medium text-white transition hover:bg-sidebar-hover',
                   location.pathname === '/saved' ? 'bg-sidebar-active' : '',
                 )}
                 to="/saved"
@@ -359,86 +388,69 @@ export function AppShell() {
               </Link>
             </div>
 
-            <section className="mt-5">
-              <div className="mb-1 px-4 font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
-                Pinned
-              </div>
-              {activeParentChats.slice(0, 4).map((parentChat) => {
-                const active =
-                  location.pathname === `/chat/${parentChat.id}` ||
-                  location.pathname.startsWith(`/chat/${parentChat.id}/thread/`)
+            {starredParentChats.length > 0 ? (
+              <section className="mt-5">
+                <div className="mb-1 flex items-center gap-1.5 px-4 font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
+                  <Star className="size-3 fill-yellow text-yellow" />
+                  Starred
+                </div>
+                {starredParentChats.map((parentChat) => {
+                  const active =
+                    location.pathname === `/chat/${parentChat.id}` ||
+                    location.pathname.startsWith(`/chat/${parentChat.id}/thread/`)
+                  const branchCount = threadCountByParentChat.get(parentChat.id) ?? 0
 
-                return (
-                  <div
-                    className={cn(
-                      'group flex items-center gap-2 px-4 py-1 text-body transition',
-                      active
-                        ? 'bg-sidebar-active font-semibold text-white'
-                        : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
-                    )}
-                    key={parentChat.id}
-                  >
-                    <Link
-                      className="flex min-w-0 flex-1 items-center gap-2"
-                      params={{ chatId: parentChat.id }}
-                      to="/chat/$chatId"
+                  return (
+                    <div
+                      className={cn(
+                        'group mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-body transition',
+                        active
+                          ? 'bg-sidebar-active font-semibold text-sidebar-active-fg'
+                          : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
+                      )}
+                      key={parentChat.id}
                     >
-                      <Hash className="size-3.5 shrink-0 text-sidebar-fg-dim" />
-                      <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
-                      <span className="font-mono text-meta text-sidebar-chip">
-                        {formatUpdatedAt(parentChat.updatedAt)}
-                      </span>
-                    </Link>
-                    <ChatActionsMenu
-                      onDelete={() => void handleDeleteParentChat(parentChat)}
-                      parentChat={parentChat}
-                    />
-                  </div>
-                )
-              })}
-            </section>
+                      <Link
+                        className="flex min-w-0 flex-1 items-center gap-2"
+                        params={{ chatId: parentChat.id }}
+                        to="/chat/$chatId"
+                      >
+                        <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
+                        {branchCount > 0 ? (
+                          <span className="rounded bg-white/10 px-1.5 font-mono text-meta font-semibold text-sidebar-chip">
+                            ↳{branchCount}
+                          </span>
+                        ) : null}
+                      </Link>
+                      <ChatActionsMenu
+                        onDelete={() => void handleDeleteParentChat(parentChat)}
+                        parentChat={parentChat}
+                      />
+                    </div>
+                  )
+                })}
+              </section>
+            ) : null}
 
-            {activeParentChat ? (
+            {activeParentChat && rootThreads.length > 0 ? (
               <section className="mt-5">
                 <div className="mb-1 flex items-center justify-between px-4">
                   <span className="font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
-                    Branches
+                    This conversation
                   </span>
                   <span className="font-mono text-meta text-sidebar-fg-dim">map ↗</span>
                 </div>
-                <Link
-                  className={cn(
-                    'flex items-center gap-2 px-4 py-1 text-body transition',
-                    activeChatId && !activeThreadId
-                      ? 'bg-sidebar-active font-semibold text-white'
-                      : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
-                  )}
-                  params={{ chatId: activeParentChat.id }}
-                  to="/chat/$chatId"
-                >
-                  <Hash className="size-3.5 shrink-0 text-sidebar-fg-dim" />
-                  <span className="min-w-0 flex-1 truncate">{activeParentChat.title}</span>
-                  <span className="font-mono text-meta text-sidebar-fg-dim">
-                    {rootThreads.length} br
-                  </span>
-                </Link>
-                {rootThreads.length === 0 ? (
-                  <div className="px-4 py-2 text-meta leading-5 text-sidebar-fg-dim">
-                    Hover a message and branch to populate this tree.
-                  </div>
-                ) : (
-                  rootThreads.map((thread) => (
-                    <BranchTreeNode
-                      activeThreadId={activeThreadId}
-                      depth={1}
-                      key={thread.id}
-                      messagesById={messagesById}
-                      parentChatId={activeParentChat.id}
-                      thread={thread}
-                      threadsByParent={threadsByParent}
-                    />
-                  ))
-                )}
+                {rootThreads.map((thread) => (
+                  <BranchTreeNode
+                    activeThreadId={activeThreadId}
+                    depth={1}
+                    key={thread.id}
+                    messagesById={messagesById}
+                    parentChatId={activeParentChat.id}
+                    thread={thread}
+                    threadsByParent={threadsByParent}
+                  />
+                ))}
               </section>
             ) : null}
 
@@ -446,21 +458,52 @@ export function AppShell() {
               <div className="mb-1 px-4 font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
                 Recent
               </div>
-              {activeParentChats.slice(4).map((parentChat) => (
-                <div className="group flex items-center gap-2 px-4 py-1 text-body text-sidebar-fg" key={parentChat.id}>
-                  <Link
-                    className="min-w-0 flex-1 truncate transition hover:text-white"
-                    params={{ chatId: parentChat.id }}
-                    to="/chat/$chatId"
-                  >
-                    # {parentChat.title}
-                  </Link>
-                  <ChatActionsMenu
-                    onDelete={() => void handleDeleteParentChat(parentChat)}
-                    parentChat={parentChat}
-                  />
-                </div>
-              ))}
+              {visibleRecentParentChats.length === 0 ? (
+                <div className="px-4 py-1 text-meta text-sidebar-fg-dim">No other chats.</div>
+              ) : (
+                visibleRecentParentChats.map((parentChat) => {
+                  const branchCount = threadCountByParentChat.get(parentChat.id) ?? 0
+                  const active = parentChat.id === activeChatId
+
+                  return (
+                    <div
+                      className={cn(
+                        'group mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-body transition',
+                        active
+                          ? 'bg-sidebar-active font-semibold text-sidebar-active-fg'
+                          : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
+                      )}
+                      key={parentChat.id}
+                    >
+                      <Link
+                        className="flex min-w-0 flex-1 items-center gap-1.5 truncate"
+                        params={{ chatId: parentChat.id }}
+                        to="/chat/$chatId"
+                      >
+                        <Hash className="size-3.5 shrink-0 text-sidebar-fg-dim" />
+                        <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
+                        {branchCount > 0 ? (
+                          <span className="rounded bg-white/10 px-1.5 font-mono text-meta font-semibold text-sidebar-chip">
+                            ↳{branchCount}
+                          </span>
+                        ) : null}
+                      </Link>
+                      <ChatActionsMenu
+                        onDelete={() => void handleDeleteParentChat(parentChat)}
+                        parentChat={parentChat}
+                      />
+                    </div>
+                  )
+                })
+              )}
+              {hasMoreRecent ? (
+                <Link
+                  className="mt-1 block px-4 py-1 font-mono text-meta font-semibold text-sidebar-chip transition hover:text-white"
+                  to="/chats"
+                >
+                  View all conversations →
+                </Link>
+              ) : null}
             </section>
 
             {showArchived ? (

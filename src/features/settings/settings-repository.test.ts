@@ -18,7 +18,7 @@ describe('settings repository', () => {
       openRouterApiKey: 'key',
       defaultModel: 'model-a',
       siteUrl: 'https://example.com',
-      siteName: 'Deepchat',
+      siteName: 'llm-slack',
       theme: 'paper',
     } as typeof DEFAULT_SETTINGS)
 
@@ -27,6 +27,19 @@ describe('settings repository', () => {
       openRouterApiKey: 'key',
       theme: 'paper',
     })
+  })
+
+  it('renames the old default site title without overwriting custom titles', async () => {
+    await db.settings.put({
+      ...DEFAULT_SETTINGS,
+      siteName: 'Deepchat',
+    })
+
+    await expect(getSettings()).resolves.toMatchObject({ siteName: 'llm-slack' })
+
+    await saveSettings({ siteName: 'My local chat' })
+
+    await expect(getSettings()).resolves.toMatchObject({ siteName: 'My local chat' })
   })
 
   it('normalizes saved user names and derives initials', async () => {

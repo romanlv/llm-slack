@@ -40,7 +40,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   openRouterApiKey: '',
   defaultModel: DEFAULT_OPENROUTER_MODEL,
   siteUrl: typeof window !== 'undefined' ? window.location.origin : '',
-  siteName: 'Deepchat',
+  siteName: 'llm-slack',
   theme: 'aubergine',
 }
 
@@ -63,7 +63,11 @@ export function userInitials(userName: string) {
 export async function getSettings() {
   const existing = await db.settings.get('app')
   if (existing) {
-    return { ...DEFAULT_SETTINGS, ...existing }
+    const settings = { ...DEFAULT_SETTINGS, ...existing }
+    return {
+      ...settings,
+      siteName: settings.siteName === 'Deepchat' ? DEFAULT_SETTINGS.siteName : settings.siteName,
+    }
   }
 
   return DEFAULT_SETTINGS

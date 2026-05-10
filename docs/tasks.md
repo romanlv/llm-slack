@@ -9,11 +9,15 @@
 - [x] pinned messages (per-message pin)
 - [x] message actions menu (the per-message ⋯ button)
 - [x] copy message
+- [x] starred chats (per-chat star toggle, Starred sidebar section, star icon in chat header)
+- [x] recent chats with cap + "View all conversations" overflow page (`/chats`)
+- [x] all conversations page
+- [x] subtle pill-shaped active selection in sidebar
 - [ ] retry failed assistant message
 - [ ] claude code oauth token provider
 - [ ] codex oauth token provider
 - [ ] free models from open router
-- [ ] pase images / upload files to chat
+- [ ] paste images / upload files to chat
 - [ ] out of credits state
 
 # planned
@@ -29,5 +33,4 @@
 - [ ] channel-level pins (distinct from per-message pins)
 - [ ] reactions to messages with emojis 
 - [ ] search
-- [ ] all conversations 
 - [ ] projects?  workspaces are projects

@@ -33,10 +33,10 @@ function estimateContextSize(messages: Array<{ content: string }>) {
 export async function sendParentChatTurn(parentChatId: string, prompt: string) {
   const parentChat = await db.parentChats.get(parentChatId)
   if (!parentChat) {
-    throw new Error('Parent chat not found.')
+    throw new Error('Conversation not found.')
   }
   if (parentChat.archivedAt) {
-    throw new Error('Archived parent chats cannot accept new sends.')
+    throw new Error('Archived conversations cannot accept new sends.')
   }
 
   const runtimeSettings = await getSettings()
@@ -66,7 +66,7 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
     const conversation = await getParentConversation(parentChatId)
     if (estimateContextSize(conversation) > APPROX_CONTEXT_CHAR_LIMIT) {
       throw new Error(
-        'This parent chat is too long for the current browser-side safety limit. Start a new parent chat or continue in a thread.',
+        'This conversation is too long for the current browser-side safety limit. Start a new conversation or continue in a thread.',
       )
     }
 
@@ -111,10 +111,10 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
   }
   const parentChat = await db.parentChats.get(thread.parentChatId)
   if (!parentChat) {
-    throw new Error('Parent chat not found.')
+    throw new Error('Conversation not found.')
   }
   if (parentChat.archivedAt) {
-    throw new Error('Archived parent chats cannot accept new sends.')
+    throw new Error('Archived conversations cannot accept new sends.')
   }
 
   const runtimeSettings = await getSettings()
@@ -148,7 +148,7 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     const conversation = await getThreadConversation(threadId)
     if (estimateContextSize(conversation) > APPROX_CONTEXT_CHAR_LIMIT) {
       throw new Error(
-        'This thread is too long for the current browser-side safety limit. Start a new thread from a narrower message or open a fresh parent chat.',
+        'This thread is too long for the current browser-side safety limit. Start a new thread from a narrower message or open a fresh conversation.',
       )
     }
 

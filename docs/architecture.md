@@ -1,13 +1,13 @@
 # Architecture Guide
 
-This document defines the desired architecture for Deepchat and the engineering
+This document defines the desired architecture for llm-slack and the engineering
 practices that should guide future feature work. It is intentionally practical:
 when a new feature conflicts with this guide, either adjust the feature design or
 update this document with the new decision and rationale.
 
 ## Current Shape
 
-Deepchat is a browser-first React application with local IndexedDB persistence
+llm-slack is a browser-first React application with local IndexedDB persistence
 and direct OpenRouter calls from the browser.
 
 The current codebase is small and understandable:
@@ -266,8 +266,15 @@ Required invariants:
 Materialized fields are allowed, but each one must have a named writer,
 rebuilder, and repair strategy. Current or likely materialized fields include
 `ParentChat.title`, `ParentChat.updatedAt`, `ParentChat.lastActivityPreview`,
-`ConversationThread.updatedAt`, `ChatMessage.directReplyCount`, and persisted
-parent/thread drafts.
+`ParentChat.starredAt`, `ConversationThread.updatedAt`,
+`ChatMessage.directReplyCount`, and persisted parent/thread drafts.
+
+`ParentChat.starredAt` records when a chat was last starred. Writers:
+`starParentChat`/`unstarParentChat`/`toggleStarParentChat`. Lifecycle: starring
+does not bump `updatedAt` (so Recent ordering is stable when a user stars a
+chat); archiving clears `starredAt` so archived chats do not linger in the
+Starred section. There is no rebuilder — the field is user-driven and has no
+derived source to recompute from.
 
 `directReplyCount` counts direct messages in the thread rooted at this message,
 excluding nested descendant threads. Changing this definition requires updating

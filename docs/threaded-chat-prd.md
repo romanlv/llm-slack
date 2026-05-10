@@ -2,7 +2,7 @@
 
 ## Summary
 
-Deepchat is a browser-first LLM chat surface inspired by Slack conversation
+llm-slack is a browser-first LLM chat surface inspired by Slack conversation
 threads.
 
 The product has two distinct conversation layers:

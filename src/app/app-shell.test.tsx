@@ -131,6 +131,52 @@ describe('AppShell chat actions', () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
+  it('renders starred chats in the Starred section and other chats in Recent', async () => {
+    location.pathname = '/chat/parent-active'
+    await db.parentChats.bulkAdd([
+      parentChat({ id: 'parent-active', title: 'Active chat', updatedAt: 5 }),
+      parentChat({ id: 'parent-star', title: 'Important', updatedAt: 4, starredAt: 99 }),
+      parentChat({ id: 'parent-other', title: 'Other chat', updatedAt: 3 }),
+    ])
+
+    render(<AppShell />)
+
+    const starredHeading = await screen.findByText('Starred', undefined, { timeout: 3000 })
+    const starredSection = starredHeading.closest('section')
+    expect(starredSection).not.toBeNull()
+    expect(starredSection!.textContent).toContain('Important')
+    expect(starredSection!.textContent).not.toContain('Other chat')
+
+    const recentHeading = screen.getByText('Recent')
+    const recentSection = recentHeading.closest('section')
+    expect(recentSection).not.toBeNull()
+    expect(recentSection!.textContent).toContain('Other chat')
+    expect(recentSection!.textContent).not.toContain('Important')
+    // Active chat stays visible in Recent so the list does not shift on selection.
+    expect(recentSection!.textContent).toContain('Active chat')
+  })
+
+  it('toggles star state from the chat actions menu', async () => {
+    location.pathname = '/chat/parent-1'
+    await db.parentChats.add(parentChat({ id: 'parent-1', title: 'Planning' }))
+
+    render(<AppShell />)
+
+    await userEvent.click(
+      await screen.findByRole(
+        'button',
+        { name: 'Actions for Planning' },
+        { timeout: 3000 },
+      ),
+    )
+    await userEvent.click(await screen.findByRole('menuitem', { name: /star chat/i }))
+
+    await waitFor(async () => {
+      const chat = await db.parentChats.get('parent-1')
+      expect(chat?.starredAt).toEqual(expect.any(Number))
+    })
+  })
+
   it('does not navigate away when deleting a non-active chat', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     location.pathname = '/chat/parent-1'

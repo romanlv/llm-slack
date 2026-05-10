@@ -3,6 +3,7 @@ import { createRootRoute, createRoute, createRouter } from '@tanstack/react-rout
 import { AppShell } from '@/app/app-shell'
 import { ChatPage } from '@/pages/chat-page'
 import { ChatThreadPage } from '@/pages/chat-thread-page'
+import { ChatsPage } from '@/pages/chats-page'
 import { HomePage } from '@/pages/home-page'
 import { ProfilePage } from '@/pages/profile-page'
 import { SavedMessagesPage } from '@/pages/saved-messages-page'
@@ -48,10 +49,17 @@ const savedRoute = createRoute({
   component: SavedMessagesPage,
 })
 
+const chatsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/chats',
+  component: ChatsPage,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   chatRoute,
   chatThreadRoute,
+  chatsRoute,
   profileRoute,
   savedRoute,
   settingsRoute,

@@ -43,7 +43,7 @@ export function SettingsPageContent() {
       defaultModel:
         String(formData.get('defaultModel') ?? '').trim() || DEFAULT_OPENROUTER_MODEL,
       openRouterApiKey: String(formData.get('openRouterApiKey') ?? '').trim(),
-      siteName: String(formData.get('siteName') ?? '').trim() || 'Deepchat',
+    siteName: String(formData.get('siteName') ?? '').trim() || 'llm-slack',
       siteUrl: String(formData.get('siteUrl') ?? '').trim(),
     })
 
@@ -131,9 +131,9 @@ export function SettingsPageContent() {
             <label className="grid gap-2">
               <span className="text-sm font-medium text-foreground">App title header</span>
               <Input
-                defaultValue={settings?.siteName ?? 'Deepchat'}
+                defaultValue={settings?.siteName ?? 'llm-slack'}
                 name="siteName"
-                placeholder="Deepchat"
+                placeholder="llm-slack"
               />
             </label>
 
@@ -173,12 +173,12 @@ export function SettingsPageContent() {
           <p className="font-semibold text-ink">Test flow</p>
           <ol className="mt-3 list-decimal space-y-2 pl-5">
             <li>Paste your OpenRouter API key here and save.</li>
-            <li>Open or create a parent chat.</li>
+            <li>Open or create a conversation.</li>
             <li>
               Pick a trending slug such as `tencent/hy3-preview:free`, or enter
               any other OpenRouter model.
             </li>
-            <li>Send a parent-chat message.</li>
+            <li>Send a message in the main conversation.</li>
             <li>Open a thread from that message and confirm replies stream in the thread pane.</li>
           </ol>
 

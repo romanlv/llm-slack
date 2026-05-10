@@ -40,7 +40,7 @@ describe('OpenRouter provider adapter', () => {
       apiKey: 'api-key',
       model: 'model-a',
       messages: [{ role: 'user', content: 'hello' }],
-      siteName: 'Deepchat',
+      siteName: 'llm-slack',
       siteUrl: 'https://example.test',
       onChunk,
       onMessageId,
@@ -54,7 +54,7 @@ describe('OpenRouter provider adapter', () => {
           Authorization: 'Bearer api-key',
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://example.test',
-          'X-Title': 'Deepchat',
+          'X-Title': 'llm-slack',
         }),
         body: JSON.stringify({
           model: 'model-a',

@@ -98,7 +98,7 @@ describe('ParentChatWorkspace', () => {
   it('renders a missing parent chat state', async () => {
     render(<ParentChatWorkspace chatId="missing-chat" />)
 
-    expect(await screen.findByText('Parent chat not found')).toBeInTheDocument()
+    expect(await screen.findByText('Conversation not found')).toBeInTheDocument()
   })
 
   it('disables the parent composer when the parent chat is archived', async () => {
@@ -107,7 +107,7 @@ describe('ParentChatWorkspace', () => {
     render(<ParentChatWorkspace chatId="parent-1" />)
 
     expect(
-      await screen.findByText('This parent chat is archived. Restore it from the sidebar to continue.'),
+      await screen.findByText('This conversation is archived. Restore it from the sidebar to continue.'),
     ).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Ask anything, or /branch to fork this convo...')).toBeDisabled()
     expect(screen.getByRole('button', { name: /send/i })).toBeDisabled()

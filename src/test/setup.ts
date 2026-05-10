@@ -6,6 +6,7 @@ import { afterEach, beforeEach, vi } from 'vitest'
 import { db } from '@/features/chat/database'
 
 beforeEach(async () => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
   db.close()
   await db.delete()
@@ -13,5 +14,6 @@ beforeEach(async () => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   db.close()
 })

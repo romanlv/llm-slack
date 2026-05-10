@@ -43,6 +43,8 @@ export type SavedMessageWithContext = SavedMessage & {
   threadRootMessage?: ChatMessage
 }
 
+let seedParentChatPromise: Promise<void> | null = null
+
 export async function createParentChat(input?: Partial<Pick<ParentChat, 'model' | 'title'>>) {
   const settings = await getSettings()
   const now = Date.now()
@@ -53,7 +55,7 @@ export async function createParentChat(input?: Partial<Pick<ParentChat, 'model' 
     createdAt: now,
     updatedAt: now,
     draft: '',
-    lastActivityPreview: 'Start the parent chat.',
+    lastActivityPreview: 'Start the conversation.',
   }
 
   await db.parentChats.add(chat)
@@ -82,7 +84,7 @@ export async function findOrCreateEmptyParentChat() {
   return createParentChat()
 }
 
-export async function ensureSeedParentChat() {
+async function seedParentChatIfNeeded() {
   const count = await db.parentChats.count()
   if (count > 0) {
     await getSettings()
@@ -98,7 +100,7 @@ export async function ensureSeedParentChat() {
     parentChatId: parentChat.id,
     role: 'assistant',
     content:
-      'Deepchat is ready. Use the parent chat for the main line of conversation, then open threads from specific messages.',
+      'llm-slack is ready. Use the main conversation for the primary path, then open threads from specific messages.',
     createdAt: Date.now(),
     status: 'complete',
     directReplyCount: 0,
@@ -109,6 +111,14 @@ export async function ensureSeedParentChat() {
     lastActivityPreview: 'Open a thread from any message.',
     updatedAt: Date.now(),
   })
+}
+
+export async function ensureSeedParentChat() {
+  seedParentChatPromise ??= seedParentChatIfNeeded().finally(() => {
+    seedParentChatPromise = null
+  })
+
+  return seedParentChatPromise
 }
 
 export async function renameParentChat(parentChatId: string, title: string) {
@@ -122,6 +132,7 @@ export async function renameParentChat(parentChatId: string, title: string) {
 export async function archiveParentChat(parentChatId: string) {
   await db.parentChats.update(parentChatId, {
     archivedAt: Date.now(),
+    starredAt: undefined,
     updatedAt: Date.now(),
   })
 }
@@ -131,6 +142,33 @@ export async function restoreParentChat(parentChatId: string) {
     archivedAt: undefined,
     updatedAt: Date.now(),
   })
+}
+
+export async function starParentChat(parentChatId: string) {
+  await db.parentChats.update(parentChatId, {
+    starredAt: Date.now(),
+  })
+}
+
+export async function unstarParentChat(parentChatId: string) {
+  await db.parentChats.update(parentChatId, {
+    starredAt: undefined,
+  })
+}
+
+export async function toggleStarParentChat(parentChatId: string) {
+  const chat = await db.parentChats.get(parentChatId)
+  if (!chat) {
+    throw new Error('Conversation not found.')
+  }
+
+  if (chat.starredAt) {
+    await unstarParentChat(parentChatId)
+    return { starred: false as const }
+  }
+
+  await starParentChat(parentChatId)
+  return { starred: true as const }
 }
 
 export async function deleteParentChat(parentChatId: string) {
@@ -156,6 +194,14 @@ export async function deleteParentChat(parentChatId: string) {
       await db.parentChats.delete(parentChatId)
     },
   )
+}
+
+export async function countThreadsByParentChat(): Promise<Map<string, number>> {
+  const threads = await db.threads.toArray()
+  return threads.reduce((map, thread) => {
+    map.set(thread.parentChatId, (map.get(thread.parentChatId) ?? 0) + 1)
+    return map
+  }, new Map<string, number>())
 }
 
 export async function setParentChatModel(parentChatId: string, model: string) {
@@ -203,7 +249,7 @@ export async function getOrCreateThreadForMessage(messageId: string) {
 
   const parentChat = await db.parentChats.get(rootMessage.parentChatId)
   if (!parentChat) {
-    throw new Error('Parent chat not found.')
+    throw new Error('Conversation not found.')
   }
 
   const parentThreadId =
@@ -328,7 +374,7 @@ export async function failMessage(messageId: string, content: string, error: str
 async function assertMessageConversationIsValid(message: ChatMessage) {
   const parentChat = await db.parentChats.get(message.parentChatId)
   if (!parentChat) {
-    throw new Error('Parent chat not found.')
+    throw new Error('Conversation not found.')
   }
 
   if (message.conversationType === 'parent') {

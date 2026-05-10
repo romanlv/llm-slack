@@ -15,6 +15,7 @@ import {
   Pencil,
   Pin,
   SendHorizonal,
+  Star,
   Trash2,
   X,
 } from 'lucide-react'
@@ -39,6 +40,7 @@ import {
   setThreadModel,
   togglePinnedMessage,
   toggleSavedMessage,
+  toggleStarParentChat,
   type ChatMessage,
   type ConversationThread,
   type PinnedMessageWithMessage,
@@ -773,7 +775,9 @@ function ChannelHeader({
   messageCount,
   onRename,
   onTabChange,
+  onToggleStar,
   pinnedCount,
+  starred,
   title,
 }: {
   activeTab: ParentTab
@@ -781,7 +785,9 @@ function ChannelHeader({
   messageCount: number
   onRename: (title: string) => void
   onTabChange: (tab: ParentTab) => void
+  onToggleStar: () => void
   pinnedCount: number
+  starred: boolean
   title: string
 }) {
   const tabClassName = (tab: ParentTab) =>
@@ -805,6 +811,19 @@ function ChannelHeader({
     <header className="border-b border-line bg-surface">
       <div className="flex items-center gap-2.5 px-5 pb-1.5 pt-2.5">
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <button
+            aria-label={starred ? `Unstar ${title}` : `Star ${title}`}
+            aria-pressed={starred}
+            className={cn(
+              'flex size-6 shrink-0 items-center justify-center rounded transition hover:bg-surface-muted',
+              starred ? 'text-yellow' : 'text-ink-dim hover:text-ink',
+            )}
+            onClick={onToggleStar}
+            title={starred ? 'Unstar conversation' : 'Star conversation'}
+            type="button"
+          >
+            <Star className={cn('size-4', starred ? 'fill-yellow' : '')} />
+          </button>
           <span className="font-mono text-body text-ink-dim">#</span>
           <input
             className="min-w-0 flex-1 border-0 bg-transparent text-title font-bold leading-tight tracking-tight text-ink outline-none"
@@ -1126,10 +1145,10 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
       <div className="flex h-full min-h-0 items-center justify-center p-6 text-center">
         <div>
           <h2 className="text-h1 font-semibold tracking-tight text-ink">
-            Parent chat not found
+            Conversation not found
           </h2>
           <p className="mt-2 max-w-md text-tab leading-6 text-ink-muted">
-            This parent chat is missing locally. Return to the sidebar and open another one.
+            This conversation is missing locally. Return to the sidebar and open another one.
           </p>
         </div>
       </div>
@@ -1264,7 +1283,9 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
           messageCount={parentMessages.length}
           onRename={(title) => void renameParentChat(parentChat.id, title)}
           onTabChange={setParentTab}
+          onToggleStar={() => void toggleStarParentChat(parentChat.id)}
           pinnedCount={parentPinnedMessages.length}
+          starred={Boolean(parentChat.starredAt)}
           title={parentChat.title}
         />
         <LineageBar
@@ -1280,7 +1301,7 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
           resetKey={`${chatId}:${parentTab}`}
         >
           {parentChat.archivedAt ? (
-            <EmptyState>This parent chat is archived. Restore it from the sidebar to continue.</EmptyState>
+            <EmptyState>This conversation is archived. Restore it from the sidebar to continue.</EmptyState>
           ) : null}
 
           {parentError ? <EmptyState>{parentError}</EmptyState> : null}
@@ -1439,7 +1460,7 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
               Branch from any message
             </h3>
             <p className="mt-2 text-tab leading-6 text-ink-muted">
-              Hover a message and choose branch. Each branch can fork again without changing the parent chat.
+              Hover a message and choose branch. Each branch can fork again without changing the main conversation.
             </p>
             <p className="mt-3 text-meta text-ink-muted">
               Configure your OpenRouter key in <Link className="underline" to="/settings">Settings</Link>.

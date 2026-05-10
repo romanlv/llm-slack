@@ -56,6 +56,7 @@
 
   --color-sidebar: var(--sidebar);
   --color-sidebar-active: var(--sidebar-active);
+  --color-sidebar-active-fg: var(--sidebar-active-fg);
   --color-sidebar-fg: var(--sidebar-fg);
   --color-sidebar-fg-muted: var(--sidebar-fg-muted);
   --color-sidebar-fg-dim: var(--sidebar-fg-dim);
@@ -118,7 +119,8 @@
   --line-strong: rgba(10, 20, 40, 0.18);
 
   --sidebar: #3f0e40;
-  --sidebar-active: #1164a3;
+  --sidebar-active: rgba(255, 255, 255, 0.13);
+  --sidebar-active-fg: #ffffff;
   --sidebar-fg: #d1c7d3;
   --sidebar-fg-muted: rgba(255, 255, 255, 0.55);
   --sidebar-fg-dim: rgba(255, 255, 255, 0.45);
@@ -163,7 +165,8 @@
   --line-strong: rgba(255, 255, 255, 0.14);
 
   --sidebar: #0a0c10;
-  --sidebar-active: #2a3470;
+  --sidebar-active: rgba(255, 255, 255, 0.10);
+  --sidebar-active-fg: #ffffff;
   --sidebar-fg: #c8c5be;
   --sidebar-fg-muted: rgba(232, 229, 221, 0.6);
   --sidebar-fg-dim: rgba(232, 229, 221, 0.4);
@@ -208,7 +211,8 @@
   --line-strong: rgba(20, 15, 10, 0.14);
 
   --sidebar: #f3f0ea;
-  --sidebar-active: rgba(20, 15, 10, 0.08);
+  --sidebar-active: rgba(20, 15, 10, 0.10);
+  --sidebar-active-fg: #1a1613;
   --sidebar-fg: #1a1613;
   --sidebar-fg-muted: #6b6358;
   --sidebar-fg-dim: #9c9488;

@@ -9,6 +9,7 @@ export interface ParentChat {
   createdAt: number
   updatedAt: number
   archivedAt?: number
+  starredAt?: number
   draft: string
   lastActivityPreview: string
 }

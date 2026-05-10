@@ -9,7 +9,7 @@ import type {
 } from '@/features/chat/domain'
 import type { AppSettings } from '@/features/settings/settings-repository'
 
-export class DeepchatDatabase extends Dexie {
+export class LlmSlackDatabase extends Dexie {
   parentChats!: EntityTable<ParentChat, 'id'>
   threads!: EntityTable<ConversationThread, 'id'>
   messages!: EntityTable<ChatMessage, 'id'>
@@ -49,7 +49,19 @@ export class DeepchatDatabase extends Dexie {
         'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
       settings: 'id',
     })
+
+    this.version(4).stores({
+      parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt',
+      threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+      messages:
+        'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+      pinnedMessages:
+        'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+      savedMessages:
+        'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
+      settings: 'id',
+    })
   }
 }
 
-export const db = new DeepchatDatabase()
+export const db = new LlmSlackDatabase()
