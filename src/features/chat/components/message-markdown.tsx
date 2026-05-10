@@ -5,12 +5,12 @@ import remarkGfm from 'remark-gfm'
 
 const components: Components = {
   p: (props) => <p className="whitespace-pre-wrap" {...props} />,
-  h1: (props) => <h2 className="mt-2 text-h1 font-bold tracking-tight first:mt-0" {...props} />,
+  h1: (props) => <h2 className="mt-2 text-heading font-bold tracking-tight first:mt-0" {...props} />,
   h2: (props) => (
-    <h3 className="mt-2 text-title font-bold tracking-tight first:mt-0" {...props} />
+    <h3 className="mt-2 text-heading font-bold tracking-tight first:mt-0" {...props} />
   ),
   h3: (props) => (
-    <h4 className="mt-2 text-title font-semibold tracking-tight first:mt-0" {...props} />
+    <h4 className="mt-2 text-heading font-semibold tracking-tight first:mt-0" {...props} />
   ),
   h4: (props) => <h5 className="mt-2 text-body font-semibold first:mt-0" {...props} />,
   h5: (props) => <h6 className="mt-2 text-body font-semibold first:mt-0" {...props} />,

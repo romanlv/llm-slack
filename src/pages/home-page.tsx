@@ -55,7 +55,7 @@ export function HomePage() {
           sidebar chats, message threads, saved replies, pins, and
           per-conversation model choices.
         </p>
-        <div className="mt-5 grid max-w-2xl grid-cols-2 gap-2 text-tab text-ink-muted sm:grid-cols-4">
+        <div className="mt-5 grid max-w-2xl grid-cols-2 gap-2 text-small text-ink-muted sm:grid-cols-4">
           <span className="inline-flex items-center gap-1.5 rounded border border-line bg-white px-2.5 py-1.5">
             <Hash className="size-3.5 text-accent" />
             Chats
@@ -93,7 +93,7 @@ export function HomePage() {
           <div className="border-b border-line bg-sidebar px-4 py-3 text-white">
             <div className="flex items-center gap-2">
               <span className="size-2 rounded-full bg-send" />
-              <span className="text-tab font-semibold">llm-slack workspace</span>
+              <span className="text-small font-semibold">llm-slack workspace</span>
             </div>
           </div>
           <div className="grid grid-cols-[136px_minmax(0,1fr)]">
@@ -101,14 +101,14 @@ export function HomePage() {
               <div className="font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
                 Starred
               </div>
-              <div className="rounded bg-sidebar-active px-2 py-1.5 text-tab font-semibold text-white">
+              <div className="rounded bg-sidebar-active px-2 py-1.5 text-small font-semibold text-white">
                 # release-plan
               </div>
-              <div className="px-2 py-1 text-tab"># prompts</div>
+              <div className="px-2 py-1 text-small"># prompts</div>
               <div className="pt-3 font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
                 This conversation
               </div>
-              <div className="flex items-center gap-1 px-2 py-1 text-tab text-sidebar-chip">
+              <div className="flex items-center gap-1 px-2 py-1 text-small text-sidebar-chip">
                 <GitBranch className="size-3" />
                 pricing branch
               </div>
@@ -116,21 +116,21 @@ export function HomePage() {
             <div className="min-w-0 bg-white p-4">
               <div className="mb-3 flex items-center justify-between border-b border-line pb-2">
                 <div>
-                  <p className="text-title font-bold text-ink"># release-plan</p>
+                  <p className="text-heading font-bold text-ink"># release-plan</p>
                   <p className="text-meta text-ink-muted">3 messages · 2 branches</p>
                 </div>
                 <Pin className="size-4 text-accent" />
               </div>
               <div className="space-y-3">
                 <div className="rounded border border-line bg-surface-muted p-3">
-                  <p className="text-tab font-semibold text-ink">You</p>
-                  <p className="mt-1 text-tab leading-5 text-ink-muted">
+                  <p className="text-small font-semibold text-ink">You</p>
+                  <p className="mt-1 text-small leading-5 text-ink-muted">
                     Draft the launch checklist and split risk notes into a thread.
                   </p>
                 </div>
                 <div className="rounded border border-line bg-white p-3 shadow-[0_10px_26px_-24px_rgba(15,23,42,0.65)]">
-                  <p className="text-tab font-semibold text-ink">Assistant</p>
-                  <p className="mt-1 text-tab leading-5 text-ink-muted">
+                  <p className="text-small font-semibold text-ink">Assistant</p>
+                  <p className="mt-1 text-small leading-5 text-ink-muted">
                     Here is the main plan. I opened a branch for pricing risk.
                   </p>
                   <div className="mt-2 inline-flex items-center gap-1 rounded bg-surface-muted px-2 py-1 text-meta text-accent">
@@ -151,7 +151,7 @@ export function HomePage() {
             >
               <Icon className="size-4 text-accent" />
               <h2 className="mt-3 text-body font-semibold text-ink">{title}</h2>
-              <p className="mt-1.5 text-tab leading-5 text-ink-muted">{body}</p>
+              <p className="mt-1.5 text-small leading-5 text-ink-muted">{body}</p>
             </div>
           ))}
         </div>

@@ -13,26 +13,38 @@
  */
 
 @theme {
+  /*
+   * Slack uses a custom Lato variant ("Slack-Lato"). Lato from Google Fonts is
+   * the closest off-the-shelf match — the rendered shape and rhythm of the UI
+   * follow from picking it as the default sans face.
+   */
   --font-sans:
-    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    "Lato", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
     sans-serif;
   --font-mono:
     "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
     monospace;
 
-  /* Type scale (paired with line-heights) */
-  --text-meta: 10px;
+  /*
+   * Type scale — four tiers, semantically named.
+   *
+   *   meta    11px  timestamps, tiny badges, kbd hints
+   *   small   13px  section labels (uppercase), secondary chips, tabs
+   *   body    15px  sidebar items, chat messages, composer (the workhorse)
+   *   heading 18px  workspace name, channel header title
+   *
+   * `body` is shared between the sidebar and the conversation pane on
+   * purpose: in Slack the two read at the same size and only differ by
+   * font-weight. Resist adding intermediate sizes — pick the closest tier.
+   */
+  --text-meta: 11px;
   --text-meta--line-height: 1.4;
-  --text-pill: 11px;
-  --text-pill--line-height: 1.4;
-  --text-tab: 12px;
-  --text-tab--line-height: 1.4;
-  --text-body: 13px;
-  --text-body--line-height: 1.55;
-  --text-title: 14px;
-  --text-title--line-height: 1.3;
-  --text-h1: 15px;
-  --text-h1--line-height: 1.3;
+  --text-small: 13px;
+  --text-small--line-height: 1.45;
+  --text-body: 15px;
+  --text-body--line-height: 1.46;
+  --text-heading: 18px;
+  --text-heading--line-height: 1.33;
 
   /* Tight corners typical of dense console UIs */
   --radius-xs: 3px;
@@ -279,11 +291,21 @@ body {
   background: transparent;
 }
 
-button,
-input,
-select,
-textarea {
-  font: inherit;
+/*
+ * Form elements ship with their own font in user-agent styles. Inherit from
+ * the surrounding context so our type tokens apply, then let Tailwind utility
+ * classes (e.g. `text-heading` on a header input) win via the cascade.
+ *
+ * Must live inside `@layer base` so `@layer utilities` rules override it —
+ * an unlayered reset would beat every utility regardless of specificity.
+ */
+@layer base {
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
 }
 
 a {

@@ -112,7 +112,7 @@ export function MenuItem({ children, destructive, onSelect }: MenuItemProps) {
   return (
     <button
       className={cn(
-        'flex w-full items-center gap-2 px-2.5 py-1 text-left text-tab transition hover:bg-surface-muted',
+        'flex w-full items-center gap-2 px-2.5 py-1 text-left text-small transition hover:bg-surface-muted',
         destructive ? 'text-danger hover:bg-danger/10' : 'text-ink',
       )}
       onClick={onSelect}

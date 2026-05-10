@@ -188,7 +188,7 @@ function BranchTreeNode({
     <>
       <Link
         className={cn(
-          'group relative mx-2 flex items-center gap-2 rounded-md px-2 py-1.5 text-tab transition',
+          'group relative mx-2 flex items-center gap-2 rounded-md px-2 py-1.5 text-small transition',
           active
             ? 'bg-sidebar-active font-semibold text-sidebar-active-fg'
             : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
@@ -345,7 +345,7 @@ export function AppShell() {
         <aside className="hidden min-h-0 flex-col overflow-hidden bg-sidebar text-sidebar-fg lg:flex">
           <div className="border-b border-sidebar-line px-4 py-3">
             <div className="flex items-center gap-2">
-              <div className="min-w-0 flex-1 truncate text-title font-bold tracking-tight text-white">
+              <div className="min-w-0 flex-1 truncate text-heading font-bold tracking-tight text-white">
                 llm-slack
               </div>
               <Link
@@ -356,10 +356,10 @@ export function AppShell() {
               </Link>
             </div>
 
-            <div className="mt-3 flex items-center gap-2 rounded-md bg-black/25 px-3 py-2 text-tab text-sidebar-fg-muted">
+            <div className="mt-3 flex items-center gap-2 rounded-md bg-black/25 px-3 py-2 text-small text-sidebar-fg-muted">
               <Search className="size-4" />
               <Input
-                className="h-6 border-0 bg-transparent p-0 font-mono text-tab text-white shadow-none placeholder:text-sidebar-fg-dim focus-visible:ring-0"
+                className="h-6 border-0 bg-transparent p-0 font-mono text-small text-white shadow-none placeholder:text-sidebar-fg-dim focus-visible:ring-0"
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="search or run /command"
                 value={search}
@@ -390,9 +390,9 @@ export function AppShell() {
 
             {starredParentChats.length > 0 ? (
               <section className="mt-5">
-                <div className="mb-1 flex items-center gap-1.5 px-4 font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
-                  <Star className="size-3 fill-yellow text-yellow" />
-                  Starred
+                <div className="mb-1 flex items-center gap-1.5 px-4 font-mono text-meta font-bold uppercase leading-none tracking-[0.08em] text-sidebar-fg-muted">
+                  <Star aria-hidden="true" className="size-3 shrink-0 text-sidebar-fg-muted" strokeWidth={2.5} />
+                  <span>Starred</span>
                 </div>
                 {starredParentChats.map((parentChat) => {
                   const active =
@@ -550,13 +550,13 @@ export function AppShell() {
                 </span>
               )}
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-tab font-semibold">{userName}</span>
+                <span className="block truncate text-small font-semibold">{userName}</span>
                 <span className="block font-mono text-meta text-sidebar-fg-dim">local profile</span>
               </span>
             </Link>
             <div
               className={cn(
-                'mb-3 inline-flex items-center gap-1 rounded px-2 py-1 text-pill font-medium',
+                'mb-3 inline-flex items-center gap-1 rounded px-2 py-1 text-meta font-medium',
                 settings?.openRouterApiKey
                   ? 'bg-send-soft text-send'
                   : 'bg-warn/15 text-warn',
@@ -571,7 +571,7 @@ export function AppShell() {
                 New
               </Button>
               <button
-                className="rounded border border-sidebar-line px-3 text-pill font-medium text-sidebar-fg transition hover:bg-sidebar-hover hover:text-white"
+                className="rounded border border-sidebar-line px-3 text-meta font-medium text-sidebar-fg transition hover:bg-sidebar-hover hover:text-white"
                 onClick={() => setShowArchived((value) => !value)}
                 type="button"
               >

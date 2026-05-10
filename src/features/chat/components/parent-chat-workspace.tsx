@@ -176,7 +176,7 @@ function Avatar({
 }) {
   if (message.role === 'assistant') {
     return (
-      <div className="flex size-7 shrink-0 items-center justify-center rounded bg-accent font-mono text-h1 font-bold leading-none text-white">
+      <div className="flex size-7 shrink-0 items-center justify-center rounded bg-accent font-mono text-heading font-bold leading-none text-white">
         ~
       </div>
     )
@@ -305,7 +305,7 @@ function MessageEditor({
       {error ? <p className="mb-1 text-meta text-danger">{error}</p> : null}
       <div className="mt-1 flex items-center justify-end gap-1.5">
         <button
-          className="rounded border border-line bg-surface px-2 py-0.5 font-mono text-pill text-ink-muted transition hover:bg-surface-muted disabled:opacity-50"
+          className="rounded border border-line bg-surface px-2 py-0.5 font-mono text-meta text-ink-muted transition hover:bg-surface-muted disabled:opacity-50"
           disabled={saving}
           onClick={onCancel}
           type="button"
@@ -313,7 +313,7 @@ function MessageEditor({
           Cancel
         </button>
         <button
-          className="rounded bg-send px-2.5 py-0.5 font-mono text-pill font-bold text-white transition hover:bg-send-hover disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded bg-send px-2.5 py-0.5 font-mono text-meta font-bold text-white transition hover:bg-send-hover disabled:cursor-not-allowed disabled:opacity-60"
           disabled={saving || !value.trim()}
           onClick={() => void submit()}
           type="button"
@@ -485,7 +485,7 @@ function MessageBlock({
 
         {hasReplies ? (
           <button
-            className="mt-1.5 inline-flex items-center gap-1.5 self-start rounded border border-line border-l-2 border-l-accent bg-surface px-2 py-1 text-tab font-semibold text-ink transition hover:border-accent-border hover:text-accent"
+            className="mt-1.5 inline-flex items-center gap-1.5 self-start rounded border border-line border-l-2 border-l-accent bg-surface px-2 py-1 text-small font-semibold text-ink transition hover:border-accent-border hover:text-accent"
             onClick={() => onOpenThread(message.id)}
             type="button"
           >
@@ -502,7 +502,7 @@ function MessageBlock({
         )}
       >
         <button
-          className="inline-flex items-center gap-1 border-r border-line px-2 py-1 font-mono text-pill font-bold text-accent transition hover:bg-accent-soft"
+          className="inline-flex items-center gap-1 border-r border-line px-2 py-1 font-mono text-meta font-bold text-accent transition hover:bg-accent-soft"
           onClick={() => onOpenThread(message.id)}
           type="button"
         >
@@ -513,7 +513,7 @@ function MessageBlock({
           aria-label={isSaved ? 'Remove from saved' : 'Save message'}
           aria-pressed={isSaved}
           className={cn(
-            'border-r border-line px-2 py-1 font-mono text-pill transition hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-60',
+            'border-r border-line px-2 py-1 font-mono text-meta transition hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-60',
             isSaved ? 'bg-accent-soft text-accent' : 'text-ink-muted',
           )}
           disabled={saving}
@@ -527,7 +527,7 @@ function MessageBlock({
           aria-label={isPinned ? 'Unpin message' : 'Pin message'}
           aria-pressed={isPinned}
           className={cn(
-            'border-r border-line px-2 py-1 font-mono text-pill transition hover:bg-pin-bg disabled:cursor-not-allowed disabled:opacity-60',
+            'border-r border-line px-2 py-1 font-mono text-meta transition hover:bg-pin-bg disabled:cursor-not-allowed disabled:opacity-60',
             isPinned ? 'bg-pin-bg text-pin' : 'text-ink-muted',
           )}
           disabled={pinning}
@@ -545,7 +545,7 @@ function MessageBlock({
               aria-expanded={triggerProps['aria-expanded']}
               aria-haspopup={triggerProps['aria-haspopup']}
               aria-label="Message actions"
-              className="px-2 py-1 font-mono text-pill text-ink-muted transition hover:bg-surface-muted"
+              className="px-2 py-1 font-mono text-meta text-ink-muted transition hover:bg-surface-muted"
               onClick={triggerProps.onClick}
               ref={triggerProps.ref as RefCallback<HTMLButtonElement>}
               type="button"
@@ -739,6 +739,7 @@ function ConversationComposer({
         <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-line px-1.5 py-1 pl-2">
           <MiniModelSelect disabled={disabled} onChange={onModelChange} value={model} />
           <ContextMeter compact={tone === 'thread'} usage={usage} />
+          {/* TODO: reply-in-thread composer mode toggle — see docs/tasks.md (planned)
           {tone === 'parent' ? (
             <button
               type="button"
@@ -751,12 +752,13 @@ function ConversationComposer({
               </span>
             </button>
           ) : null}
+          */}
           <div className="flex-1" />
           <button className="rounded-xs p-1 text-ink-dim transition hover:bg-surface-muted" type="button">
             <Paperclip className="size-3.5" />
           </button>
           <button
-            className="inline-flex h-[22px] items-center gap-1 rounded-xs bg-send px-3 font-mono text-pill font-bold tracking-wide text-white transition hover:bg-send-hover disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-[22px] items-center gap-1 rounded-xs bg-send px-3 font-mono text-meta font-bold tracking-wide text-white transition hover:bg-send-hover disabled:cursor-not-allowed disabled:opacity-50"
             disabled={disabled || value.trim().length === 0}
             type="submit"
           >
@@ -792,7 +794,7 @@ function ChannelHeader({
 }) {
   const tabClassName = (tab: ParentTab) =>
     cn(
-      '-mb-px border-b-2 px-2.5 pt-1.5 pb-2 text-tab font-semibold',
+      '-mb-px border-b-2 px-2.5 pt-1.5 pb-2 text-small font-semibold',
       activeTab === tab
         ? 'border-accent text-ink'
         : 'border-transparent text-ink-muted hover:text-ink',
@@ -826,7 +828,7 @@ function ChannelHeader({
           </button>
           <span className="font-mono text-body text-ink-dim">#</span>
           <input
-            className="min-w-0 flex-1 border-0 bg-transparent text-title font-bold leading-tight tracking-tight text-ink outline-none"
+            className="min-w-0 flex-1 border-0 bg-transparent text-heading font-bold leading-tight tracking-tight text-ink outline-none"
             onBlur={() => setDraftTitle(title)}
             onChange={(event) => {
               setDraftTitle(event.target.value)
@@ -836,7 +838,7 @@ function ChannelHeader({
             value={draftTitle}
           />
         </div>
-        <div className="hidden items-baseline gap-3 font-mono text-pill sm:flex">
+        <div className="hidden items-baseline gap-3 font-mono text-meta sm:flex">
           <span className="text-ink-dim">
             msgs <strong className="ml-1 text-ink">{messageCount}</strong>
           </span>
@@ -872,7 +874,7 @@ function ChannelHeader({
         </button>
         <button
           aria-disabled="true"
-          className="inline-flex items-center gap-1.5 px-2.5 pt-1.5 pb-2 text-tab font-medium text-ink-muted opacity-60"
+          className="inline-flex items-center gap-1.5 px-2.5 pt-1.5 pb-2 text-small font-medium text-ink-muted opacity-60"
           disabled
           type="button"
         >
@@ -881,7 +883,7 @@ function ChannelHeader({
         </button>
         <button
           aria-disabled="true"
-          className="px-2.5 pt-1.5 pb-2 text-tab font-medium text-ink-muted opacity-60"
+          className="px-2.5 pt-1.5 pb-2 text-small font-medium text-ink-muted opacity-60"
           disabled
           type="button"
         >
@@ -909,7 +911,7 @@ function LineageBar({
 
   return (
     <div className="border-b border-accent-border bg-accent-bg px-5 py-1.5">
-      <div className="flex flex-wrap items-center gap-1.5 text-tab">
+      <div className="flex flex-wrap items-center gap-1.5 text-small">
         <Link
           className="font-semibold text-accent underline-offset-4 hover:underline"
           params={{ chatId }}
@@ -940,7 +942,7 @@ function LineageBar({
 
 function EmptyState({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-5 my-4 rounded border border-dashed border-line-strong bg-surface-muted px-4 py-5 text-tab leading-6 text-ink-muted">
+    <div className="mx-5 my-4 rounded border border-dashed border-line-strong bg-surface-muted px-4 py-5 text-small leading-6 text-ink-muted">
       {children}
     </div>
   )
@@ -1144,10 +1146,10 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
     return (
       <div className="flex h-full min-h-0 items-center justify-center p-6 text-center">
         <div>
-          <h2 className="text-h1 font-semibold tracking-tight text-ink">
+          <h2 className="text-heading font-semibold tracking-tight text-ink">
             Conversation not found
           </h2>
-          <p className="mt-2 max-w-md text-tab leading-6 text-ink-muted">
+          <p className="mt-2 max-w-md text-small leading-6 text-ink-muted">
             This conversation is missing locally. Return to the sidebar and open another one.
           </p>
         </div>
@@ -1370,10 +1372,10 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
           <header className="border-b border-line px-3.5 pb-2 pt-2.5">
             <div className="flex items-center gap-2">
               <GitBranch className="size-3.5 shrink-0 text-accent" />
-              <h2 className="min-w-0 flex-1 truncate text-title font-bold tracking-tight text-ink">
+              <h2 className="min-w-0 flex-1 truncate text-heading font-bold tracking-tight text-ink">
                 {branchLabel(rootMessage)}
               </h2>
-              <button className="rounded-xs border border-line px-2 font-mono text-pill leading-5 text-ink transition hover:bg-surface-muted" type="button">
+              <button className="rounded-xs border border-line px-2 font-mono text-meta leading-5 text-ink transition hover:bg-surface-muted" type="button">
                 ⋯
               </button>
               <button
@@ -1456,10 +1458,10 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
         <div className="hidden items-center justify-center gap-3 border-l border-line xl:flex">
           <div className="max-w-sm text-center">
             <GitBranch className="mx-auto size-7 text-accent" />
-            <h3 className="mt-4 text-h1 font-semibold text-ink">
+            <h3 className="mt-4 text-heading font-semibold text-ink">
               Branch from any message
             </h3>
-            <p className="mt-2 text-tab leading-6 text-ink-muted">
+            <p className="mt-2 text-small leading-6 text-ink-muted">
               Hover a message and choose branch. Each branch can fork again without changing the main conversation.
             </p>
             <p className="mt-3 text-meta text-ink-muted">

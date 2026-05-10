@@ -108,7 +108,7 @@ export function ProfilePageContent() {
           )}
 
           <div className="grid gap-2">
-            <label className="inline-flex w-fit cursor-pointer items-center gap-2 rounded-md border border-line bg-surface px-3 py-2 text-tab font-semibold text-ink transition hover:bg-surface-muted">
+            <label className="inline-flex w-fit cursor-pointer items-center gap-2 rounded-md border border-line bg-surface px-3 py-2 text-small font-semibold text-ink transition hover:bg-surface-muted">
               <Camera className="size-4" />
               Change picture
               <input

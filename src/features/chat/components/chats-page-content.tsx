@@ -39,19 +39,19 @@ export function ChatsPageContent() {
       <header className="border-b border-line bg-surface px-5 pb-3 pt-4">
         <div className="flex items-center gap-2">
           <MessagesSquare className="size-4 text-accent" />
-          <h1 className="text-title font-bold tracking-tight text-ink">All conversations</h1>
+          <h1 className="text-heading font-bold tracking-tight text-ink">All conversations</h1>
           <span className="rounded-full border border-line bg-surface-muted px-2 font-mono text-meta text-ink-muted">
             {activeChats.length}
           </span>
         </div>
-        <p className="mt-1 text-tab text-ink-muted">
+        <p className="mt-1 text-small text-ink-muted">
           Every conversation in this workspace. Star the ones you want pinned to the sidebar.
         </p>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-white px-5 py-4">
         {activeChats.length === 0 ? (
-          <div className="mx-auto max-w-md rounded border border-dashed border-line-strong bg-surface-muted px-4 py-8 text-center text-tab leading-6 text-ink-muted">
+          <div className="mx-auto max-w-md rounded border border-dashed border-line-strong bg-surface-muted px-4 py-8 text-center text-small leading-6 text-ink-muted">
             No conversations yet.
           </div>
         ) : (

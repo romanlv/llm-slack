@@ -124,7 +124,7 @@ function SavedMessageCard({
           <span />
         )}
         <button
-          className="rounded border border-line bg-surface px-2 py-0.5 font-mono text-pill text-ink-muted transition hover:bg-surface-muted hover:text-ink"
+          className="rounded border border-line bg-surface px-2 py-0.5 font-mono text-meta text-ink-muted transition hover:bg-surface-muted hover:text-ink"
           onClick={(event) => {
             stop(event)
             void toggleSavedMessage(saved.messageId)
@@ -168,12 +168,12 @@ export function SavedMessagesPageContent() {
       <header className="border-b border-line bg-surface px-5 pb-3 pt-4">
         <div className="flex items-center gap-2">
           <Bookmark className="size-4 text-accent" />
-          <h1 className="text-title font-bold tracking-tight text-ink">Saved for later</h1>
+          <h1 className="text-heading font-bold tracking-tight text-ink">Saved for later</h1>
           <span className="rounded-full border border-line bg-surface-muted px-2 font-mono text-meta text-ink-muted">
             {savedMessages.length}
           </span>
         </div>
-        <p className="mt-1 text-tab text-ink-muted">
+        <p className="mt-1 text-small text-ink-muted">
           A private collection across every chat. Click a saved entry to jump back to its
           original message.
         </p>
@@ -181,7 +181,7 @@ export function SavedMessagesPageContent() {
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-white px-5 py-4">
         {savedMessages.length === 0 ? (
-          <div className="mx-auto max-w-md rounded border border-dashed border-line-strong bg-surface-muted px-4 py-8 text-center text-tab leading-6 text-ink-muted">
+          <div className="mx-auto max-w-md rounded border border-dashed border-line-strong bg-surface-muted px-4 py-8 text-center text-small leading-6 text-ink-muted">
             No saved messages yet. Use the bookmark action on any message to keep it here.
           </div>
         ) : (

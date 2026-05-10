@@ -69,8 +69,8 @@ export function SettingsPageContent() {
       <CardContent className="grid gap-6 px-0 pb-0">
         <section className="grid gap-3">
           <div>
-            <h3 className="text-title font-semibold text-ink">Appearance</h3>
-            <p className="mt-1 text-tab text-ink-muted">
+            <h3 className="text-heading font-semibold text-ink">Appearance</h3>
+            <p className="mt-1 text-small text-ink-muted">
               Themes recolor the entire workspace. The choice is stored locally.
             </p>
           </div>
@@ -92,7 +92,7 @@ export function SettingsPageContent() {
                 >
                   <ThemeSwatch theme={option.id} />
                   <div>
-                    <div className="text-tab font-semibold text-ink">{option.label}</div>
+                    <div className="text-small font-semibold text-ink">{option.label}</div>
                     <div className="mt-0.5 text-meta text-ink-muted">{option.description}</div>
                   </div>
                 </button>
@@ -155,7 +155,7 @@ export function SettingsPageContent() {
           </div>
         </form>
 
-        <div className="rounded-md border border-warn/30 bg-pin-bg p-5 text-tab leading-6 text-ink-muted">
+        <div className="rounded-md border border-warn/30 bg-pin-bg p-5 text-small leading-6 text-ink-muted">
           <div className="flex items-start gap-3">
             <ShieldAlert className="mt-0.5 size-5 shrink-0 text-warn" />
             <div>
@@ -169,7 +169,7 @@ export function SettingsPageContent() {
           </div>
         </div>
 
-        <div className="rounded-md border border-line bg-surface p-5 text-tab leading-6 text-ink-muted">
+        <div className="rounded-md border border-line bg-surface p-5 text-small leading-6 text-ink-muted">
           <p className="font-semibold text-ink">Test flow</p>
           <ol className="mt-3 list-decimal space-y-2 pl-5">
             <li>Paste your OpenRouter API key here and save.</li>

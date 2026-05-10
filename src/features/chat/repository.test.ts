@@ -390,9 +390,10 @@ describe('thread repository semantics', () => {
       }),
     )
 
-    vi.spyOn(Date, 'now').mockReturnValueOnce(100).mockReturnValueOnce(200)
-
+    const pinTimestamps = vi.spyOn(Date, 'now')
+    pinTimestamps.mockReturnValue(100)
     await pinMessage('root')
+    pinTimestamps.mockReturnValue(200)
     await pinMessage('thread-message')
 
     const pins = await listPinnedMessagesForParentChat('parent-1')
