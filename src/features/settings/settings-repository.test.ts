@@ -29,19 +29,6 @@ describe('settings repository', () => {
     })
   })
 
-  it('renames the old default site title without overwriting custom titles', async () => {
-    await db.settings.put({
-      ...DEFAULT_SETTINGS,
-      siteName: 'Deepchat',
-    })
-
-    await expect(getSettings()).resolves.toMatchObject({ siteName: 'llm-slack' })
-
-    await saveSettings({ siteName: 'My local chat' })
-
-    await expect(getSettings()).resolves.toMatchObject({ siteName: 'My local chat' })
-  })
-
   it('normalizes saved user names and derives initials', async () => {
     await expect(saveSettings({ userName: '  Ada   Lovelace  ' })).resolves.toMatchObject({
       userName: 'Ada Lovelace',

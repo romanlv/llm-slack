@@ -41,7 +41,7 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
 
   const runtimeSettings = await getSettings()
   if (!runtimeSettings.openRouterApiKey.trim()) {
-    throw new Error('Add an OpenRouter API key in Settings before sending.')
+    throw new Error('Connect a provider in Settings before sending.')
   }
 
   const trimmed = prompt.trim()
@@ -119,7 +119,7 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
 
   const runtimeSettings = await getSettings()
   if (!runtimeSettings.openRouterApiKey.trim()) {
-    throw new Error('Add an OpenRouter API key in Settings before sending.')
+    throw new Error('Connect a provider in Settings before sending.')
   }
 
   const trimmed = prompt.trim()

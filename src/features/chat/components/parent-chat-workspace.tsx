@@ -9,6 +9,7 @@ import {
   Copy,
   GitBranch,
   GitFork,
+  KeyRound,
   LoaderCircle,
   MoreHorizontal,
   Paperclip,
@@ -686,6 +687,7 @@ function ConversationComposer({
   onModelChange,
   onSubmit,
   placeholder,
+  submitDisabled,
   tone,
   usage,
   value,
@@ -697,10 +699,12 @@ function ConversationComposer({
   onModelChange: (value: string) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   placeholder: string
+  submitDisabled?: boolean
   tone: ComposerTone
   usage?: ProviderUsage
   value: string
 }) {
+  const cannotSubmit = disabled || submitDisabled
   const formRef = useRef<HTMLFormElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -725,7 +729,7 @@ function ConversationComposer({
             disabled={disabled}
             onChange={(event: ChangeEvent<HTMLTextAreaElement>) => onChange(event.target.value)}
             onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
-              if (event.key !== 'Enter' || !event.metaKey || disabled) {
+              if (event.key !== 'Enter' || !event.metaKey || cannotSubmit) {
                 return
               }
 
@@ -761,7 +765,7 @@ function ConversationComposer({
           </button>
           <button
             className="inline-flex h-[22px] items-center gap-1 rounded-xs bg-send px-3 font-mono text-meta font-bold tracking-wide text-white transition hover:bg-send-hover disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={disabled || value.trim().length === 0}
+            disabled={cannotSubmit || value.trim().length === 0}
             type="submit"
           >
             SEND
@@ -986,6 +990,24 @@ function LineageBar({
   )
 }
 
+function ProviderConnectBanner() {
+  return (
+    <div className="mx-5 mb-1 mt-2 flex items-center gap-2.5 rounded-md border border-warn/40 bg-warn/10 px-3 py-2">
+      <KeyRound className="size-4 shrink-0 text-warn" />
+      <p className="min-w-0 flex-1 text-small leading-5 text-ink">
+        <span className="font-semibold">Connect an LLM provider to start chatting.</span>{' '}
+        <span className="text-ink-muted">Your API key stays in this browser.</span>
+      </p>
+      <Link
+        className="inline-flex shrink-0 items-center gap-1 rounded bg-warn px-2.5 py-1 font-mono text-meta font-bold tracking-wide text-white transition hover:opacity-90"
+        to="/settings"
+      >
+        CONNECT
+      </Link>
+    </div>
+  )
+}
+
 function EmptyState({ children }: { children: ReactNode }) {
   return (
     <div className="mx-5 my-4 rounded border border-dashed border-line-strong bg-surface-muted px-4 py-5 text-small leading-6 text-ink-muted">
@@ -1142,6 +1164,7 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
   )
   const parentScrollContentKeyForActiveTab =
     parentTab === 'pinned' ? parentPinnedScrollContentKey : parentScrollContentKey
+  const hasProviderKey = Boolean(settings?.openRouterApiKey?.trim())
 
   function jumpToMessage(messageId: string) {
     const element = document.getElementById(messageElementId(messageId))
@@ -1396,21 +1419,24 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
           )}
         </SmartMessageScrollPane>
 
-        <ConversationComposer
-          className="row-start-4"
-          disabled={
-            sendingParent ||
-            Boolean(parentChat.archivedAt)
-          }
-          model={parentChat.model}
-          onChange={(value) => void saveParentDraft(parentChat.id, value)}
-          onModelChange={(model) => void setParentChatModel(parentChat.id, model)}
-          onSubmit={handleParentSubmit}
-          placeholder="Ask anything, or /branch to fork this convo..."
-          tone="parent"
-          usage={parentUsage}
-          value={parentChat.draft}
-        />
+        <div className="row-start-4">
+          {hasProviderKey ? null : <ProviderConnectBanner />}
+          <ConversationComposer
+            disabled={
+              sendingParent ||
+              Boolean(parentChat.archivedAt)
+            }
+            model={parentChat.model}
+            onChange={(value) => void saveParentDraft(parentChat.id, value)}
+            onModelChange={(model) => void setParentChatModel(parentChat.id, model)}
+            onSubmit={handleParentSubmit}
+            placeholder="Ask anything, or /branch to fork this convo..."
+            submitDisabled={!hasProviderKey}
+            tone="parent"
+            usage={parentUsage}
+            value={parentChat.draft}
+          />
+        </div>
       </section>
 
       {threadId ? (
@@ -1506,25 +1532,29 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
             )}
           </SmartMessageScrollPane>
 
-          <ConversationComposer
-            disabled={
-              !activeThread ||
-              sendingThreadId === activeThread.id ||
-              Boolean(parentChat.archivedAt)
-            }
-            model={activeThread?.model ?? parentChat.model}
-            onChange={(value) =>
-              activeThread ? void saveThreadDraft(activeThread.id, value) : undefined
-            }
-            onModelChange={(model) =>
-              activeThread ? void setThreadModel(activeThread.id, model) : undefined
-            }
-            onSubmit={handleThreadSubmit}
-            placeholder="Continue this branch, or /branch to fork again..."
-            tone="thread"
-            usage={threadUsage}
-            value={activeThread?.draft ?? ''}
-          />
+          <div>
+            {hasProviderKey ? null : <ProviderConnectBanner />}
+            <ConversationComposer
+              disabled={
+                !activeThread ||
+                sendingThreadId === activeThread.id ||
+                Boolean(parentChat.archivedAt)
+              }
+              model={activeThread?.model ?? parentChat.model}
+              onChange={(value) =>
+                activeThread ? void saveThreadDraft(activeThread.id, value) : undefined
+              }
+              onModelChange={(model) =>
+                activeThread ? void setThreadModel(activeThread.id, model) : undefined
+              }
+              onSubmit={handleThreadSubmit}
+              placeholder="Continue this branch, or /branch to fork again..."
+              submitDisabled={!hasProviderKey}
+              tone="thread"
+              usage={threadUsage}
+              value={activeThread?.draft ?? ''}
+            />
+          </div>
         </aside>
       ) : null}
 
@@ -1537,9 +1567,6 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
             </h3>
             <p className="mt-2 text-small leading-6 text-ink-muted">
               Hover a message and choose branch. Each branch can fork again without changing the main conversation.
-            </p>
-            <p className="mt-3 text-meta text-ink-muted">
-              Configure your OpenRouter key in <Link className="underline" to="/settings">Settings</Link>.
             </p>
           </div>
         </div>

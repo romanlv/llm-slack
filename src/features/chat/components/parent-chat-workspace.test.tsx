@@ -85,9 +85,10 @@ function thread(overrides: Partial<ConversationThread> = {}): ConversationThread
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   navigate.mockReset()
   mockedSendParentChatTurn.mockReset()
+  await saveSettings({ openRouterApiKey: 'test-key' })
 })
 
 afterEach(() => {
@@ -111,6 +112,22 @@ describe('ParentChatWorkspace', () => {
     ).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Ask anything, or /branch to fork this convo...')).toBeDisabled()
     expect(screen.getByRole('button', { name: /send/i })).toBeDisabled()
+  })
+
+  it('disables SEND but keeps the textarea editable when no provider key is configured', async () => {
+    await saveSettings({ openRouterApiKey: '' })
+    await db.parentChats.add(parentChat({ draft: 'queued prompt' }))
+
+    render(<ParentChatWorkspace chatId="parent-1" />)
+
+    expect(await screen.findByRole('link', { name: /connect/i })).toBeInTheDocument()
+    const textarea = screen.getByPlaceholderText('Ask anything, or /branch to fork this convo...')
+    expect(textarea).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled()
+
+    textarea.focus()
+    await userEvent.keyboard('{Meta>}{Enter}{/Meta}')
+    expect(mockedSendParentChatTurn).not.toHaveBeenCalled()
   })
 
   it('submits the parent draft with the command-enter keyboard shortcut', async () => {

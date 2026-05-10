@@ -333,6 +333,7 @@ export function AppShell() {
     : undefined
   const userName = settings?.userName ?? DEFAULT_USER_NAME
   const avatarDataUrl = settings?.avatarDataUrl
+  const hasProviderKey = Boolean(settings?.openRouterApiKey?.trim())
   const messagesById = new Map(
     branchRootMessages
       .filter((message): message is ChatMessage => Boolean(message))
@@ -571,17 +572,16 @@ export function AppShell() {
                 <span className="block font-mono text-meta text-sidebar-fg-dim">local profile</span>
               </span>
             </Link>
-            <div
+            <Link
               className={cn(
-                'mb-3 inline-flex items-center gap-1 rounded px-2 py-1 text-meta font-medium',
-                settings?.openRouterApiKey
-                  ? 'bg-send-soft text-send'
-                  : 'bg-warn/15 text-warn',
+                'mb-3 inline-flex items-center gap-1 rounded px-2 py-1 text-meta font-medium transition hover:opacity-90',
+                hasProviderKey ? 'bg-send-soft text-send' : 'bg-warn/15 text-warn',
               )}
+              to="/settings"
             >
               <KeyRound className="size-3" />
-              {settings?.openRouterApiKey ? 'OpenRouter ready' : 'Add API key'}
-            </div>
+              {hasProviderKey ? 'Provider connected' : 'Connect a provider'}
+            </Link>
             <div className="grid grid-cols-2 gap-2">
               <Button className="h-9 justify-center rounded bg-sidebar-hover text-white hover:bg-white/15" onClick={handleNewParentChat}>
                 <MessageSquarePlus className="size-4" />

@@ -3,7 +3,7 @@ import { DEFAULT_OPENROUTER_MODEL } from '@/features/providers/openrouter-models
 
 export type AppTheme = 'aubergine' | 'midnight' | 'paper'
 
-export const DEFAULT_USER_NAME = 'Mira Chen'
+export const DEFAULT_USER_NAME = 'Local User'
 
 export const APP_THEMES: ReadonlyArray<{ id: AppTheme; label: string; description: string }> = [
   {
@@ -63,11 +63,7 @@ export function userInitials(userName: string) {
 export async function getSettings() {
   const existing = await db.settings.get('app')
   if (existing) {
-    const settings = { ...DEFAULT_SETTINGS, ...existing }
-    return {
-      ...settings,
-      siteName: settings.siteName === 'Deepchat' ? DEFAULT_SETTINGS.siteName : settings.siteName,
-    }
+    return { ...DEFAULT_SETTINGS, ...existing }
   }
 
   return DEFAULT_SETTINGS

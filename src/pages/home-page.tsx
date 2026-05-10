@@ -77,14 +77,6 @@ export function HomePage() {
           <Button onClick={handleStart} size="lg">
             Start a conversation
           </Button>
-          <a
-            className="inline-flex h-11 items-center justify-center rounded border border-line bg-white px-5 text-sm font-medium text-ink transition hover:bg-surface-muted"
-            href="https://openrouter.ai/docs/api-reference/chat-completion"
-            rel="noreferrer"
-            target="_blank"
-          >
-            OpenRouter docs
-          </a>
         </div>
       </section>
 

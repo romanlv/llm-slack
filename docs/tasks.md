@@ -22,7 +22,7 @@
 
 # planned
 
-- [ ] regenerate assistant reply
+- [ ] regenerate assistant reply with user hint
 - [ ] defining agents (model + prompt + tools)
 - [ ] allow multiple agents to participate in a chat
 - [ ] global search / command palette (⌘K)
@@ -34,3 +34,4 @@
 - [ ] reactions to messages with emojis 
 - [ ] search
 - [ ] projects?  workspaces are projects
+- [ ] export chats

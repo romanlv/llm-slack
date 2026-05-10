@@ -59,10 +59,10 @@ export function SettingsPageContent() {
     <div className="p-6 md:p-10">
       <CardHeader className="px-0 pt-0">
         <Badge>Settings</Badge>
-        <CardTitle className="text-3xl">OpenRouter configuration</CardTitle>
+        <CardTitle className="text-3xl">Provider configuration</CardTitle>
         <CardDescription className="max-w-3xl text-base">
-          This app runs in the browser only. Your OpenRouter API key stays on this
-          device and is sent directly from the browser to OpenRouter.
+          This app runs in the browser only. Your provider API key stays on this
+          device and is sent directly from the browser to the provider.
         </CardDescription>
       </CardHeader>
 
@@ -122,7 +122,7 @@ export function SettingsPageContent() {
 
           <ModelPicker
             defaultValue={settings?.defaultModel ?? DEFAULT_OPENROUTER_MODEL}
-            description="Visible options are high-ranked OpenRouter models checked on April 23, 2026. You can still enter any valid model slug."
+            description="Visible options are high-ranked OpenRouter models checked on April 23, 2026. You can still enter any valid model slug your provider accepts."
             label="Default model"
             name="defaultModel"
           />
@@ -172,11 +172,11 @@ export function SettingsPageContent() {
         <div className="rounded-md border border-line bg-surface p-5 text-small leading-6 text-ink-muted">
           <p className="font-semibold text-ink">Test flow</p>
           <ol className="mt-3 list-decimal space-y-2 pl-5">
-            <li>Paste your OpenRouter API key here and save.</li>
+            <li>Paste your provider API key here and save.</li>
             <li>Open or create a conversation.</li>
             <li>
               Pick a trending slug such as `tencent/hy3-preview:free`, or enter
-              any other OpenRouter model.
+              any other model your provider accepts.
             </li>
             <li>Send a message in the main conversation.</li>
             <li>Open a thread from that message and confirm replies stream in the thread pane.</li>

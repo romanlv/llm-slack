@@ -17,7 +17,7 @@ export class LlmSlackDatabase extends Dexie {
   savedMessages!: EntityTable<SavedMessage, 'id'>
   settings!: EntityTable<AppSettings, 'id'>
 
-  constructor(name = 'deepchat-threaded') {
+  constructor(name = 'llm-slack') {
     super(name)
 
     this.version(1).stores({
