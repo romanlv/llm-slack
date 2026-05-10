@@ -32,13 +32,3 @@
   single spy and call `mockReturnValue` between awaits. Do not chain
   `mockReturnValueOnce(...)` — incidental Date.now() calls inside Dexie or
   React internals consume queue slots and produce order-dependent flakes.
-
-## Test Commands
-
-- `pnpm test` runs the full Vitest suite once.
-- `pnpm test:watch` runs Vitest in watch mode.
-- `pnpm typecheck` runs TypeScript checks.
-- `pnpm lint` runs ESLint.
-
-Run `pnpm test`, `pnpm typecheck`, and `pnpm lint` before committing test or
-runtime changes.
