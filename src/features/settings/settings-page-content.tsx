@@ -175,7 +175,7 @@ export function SettingsPageContent() {
             <li>Paste your OpenRouter API key here and save.</li>
             <li>Open or create a parent chat.</li>
             <li>
-              Pick a trending slug such as `moonshotai/kimi-k2.6`, or enter
+              Pick a trending slug such as `tencent/hy3-preview:free`, or enter
               any other OpenRouter model.
             </li>
             <li>Send a parent-chat message.</li>
