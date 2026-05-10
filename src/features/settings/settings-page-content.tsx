@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { ModelPicker } from '@/features/model-selection/components/model-picker'
 import {
   APP_THEMES,
+  DEFAULT_SETTINGS,
   getSettings,
   saveSettings,
   type AppTheme,
@@ -31,7 +32,7 @@ function ThemeSwatch({ theme }: { theme: AppTheme }) {
 }
 
 export function SettingsPageContent() {
-  const settings = useLiveQuery(() => getSettings(), [], undefined)
+  const settings = useLiveQuery(() => getSettings(), [], DEFAULT_SETTINGS)
   const [savedMessage, setSavedMessage] = useState('')
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -57,7 +58,7 @@ export function SettingsPageContent() {
   return (
     <div className="p-6 md:p-10">
       <CardHeader className="px-0 pt-0">
-        <Badge>Provider settings</Badge>
+        <Badge>Settings</Badge>
         <CardTitle className="text-3xl">OpenRouter configuration</CardTitle>
         <CardDescription className="max-w-3xl text-base">
           This app runs in the browser only. Your OpenRouter API key stays on this

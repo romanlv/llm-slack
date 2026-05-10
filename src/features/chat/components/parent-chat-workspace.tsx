@@ -41,6 +41,11 @@ import {
   type ThreadAncestor,
 } from '@/features/chat/repository'
 import { OPENROUTER_TRENDING_MODELS } from '@/features/providers/openrouter-models'
+import {
+  DEFAULT_USER_NAME,
+  getSettings,
+  userInitials,
+} from '@/features/settings/settings-repository'
 import { cn } from '@/lib/utils'
 
 type ParentChatWorkspaceProps = {
@@ -84,7 +89,7 @@ function branchLabel(message?: ChatMessage) {
   return text.length > 34 ? `${text.slice(0, 31)}...` : text || 'Untitled branch'
 }
 
-function authorLabel(message: ChatMessage) {
+function authorLabel(message: ChatMessage, userName: string) {
   if (message.role === 'assistant') {
     return modelShortName(message.model) ?? 'Assistant'
   }
@@ -93,7 +98,7 @@ function authorLabel(message: ChatMessage) {
     return 'System'
   }
 
-  return 'Mira'
+  return userName
 }
 
 function latestProviderUsage(messages: ChatMessage[]) {
@@ -182,7 +187,15 @@ function MessageText({ content, streaming }: { content: string; streaming?: bool
   )
 }
 
-function Avatar({ message }: { message: ChatMessage }) {
+function Avatar({
+  avatarDataUrl,
+  message,
+  userName,
+}: {
+  avatarDataUrl?: string
+  message: ChatMessage
+  userName: string
+}) {
   if (message.role === 'assistant') {
     return (
       <div className="flex size-7 shrink-0 items-center justify-center rounded bg-accent font-mono text-h1 font-bold leading-none text-white">
@@ -199,9 +212,19 @@ function Avatar({ message }: { message: ChatMessage }) {
     )
   }
 
+  if (avatarDataUrl) {
+    return (
+      <img
+        alt={`${userName} avatar`}
+        className="size-7 shrink-0 rounded bg-yellow object-cover"
+        src={avatarDataUrl}
+      />
+    )
+  }
+
   return (
     <div className="flex size-7 shrink-0 items-center justify-center rounded bg-yellow font-mono text-meta font-black text-sidebar">
-      MC
+      {userInitials(userName)}
     </div>
   )
 }
@@ -329,11 +352,15 @@ function MessageBlock({
   compact,
   message,
   onOpenThread,
+  avatarDataUrl,
+  userName,
 }: {
   active?: boolean
   compact?: boolean
   message: ChatMessage
   onOpenThread: (messageId: string) => void
+  avatarDataUrl?: string
+  userName: string
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -361,10 +388,10 @@ function MessageBlock({
         compact ? 'px-4' : '',
       )}
     >
-      <Avatar message={message} />
+      <Avatar avatarDataUrl={avatarDataUrl} message={message} userName={userName} />
       <div className="min-w-0 max-w-full flex-1 overflow-hidden">
         <div className="mb-0.5 flex flex-wrap items-baseline gap-2">
-          <span className="text-body font-bold text-ink">{authorLabel(message)}</span>
+          <span className="text-body font-bold text-ink">{authorLabel(message, userName)}</span>
           {message.role === 'assistant' && message.model ? (
             <span className="rounded border border-line bg-surface-muted px-1 py-px font-mono text-meta text-ink-muted">
               {modelShortName(message.model)}
@@ -845,6 +872,7 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
   const [sendingThreadId, setSendingThreadId] = useState<string | null>(null)
 
   const parentChat = useLiveQuery(() => db.parentChats.get(chatId), [chatId], undefined)
+  const settings = useLiveQuery(() => getSettings(), [], undefined)
   const parentMessages = useLiveQuery(
     () =>
       db.messages
@@ -896,6 +924,8 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
     .join('|')
   const parentUsage = latestProviderUsage(parentMessages)
   const threadUsage = latestProviderUsage(threadMessages)
+  const userName = settings?.userName ?? DEFAULT_USER_NAME
+  const avatarDataUrl = settings?.avatarDataUrl
 
   if (!parentChat) {
     return (
@@ -1008,9 +1038,11 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
           ) : (
             parentMessages.map((message) => (
               <MessageBlock
+                avatarDataUrl={avatarDataUrl}
                 key={message.id}
                 message={message}
                 onOpenThread={(messageId) => void openThreadForMessage(messageId)}
+                userName={userName}
               />
             ))
           )}
@@ -1081,10 +1113,12 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
             ) : (
               threadMessages.map((message) => (
                 <MessageBlock
+                  avatarDataUrl={avatarDataUrl}
                   compact
                   key={message.id}
                   message={message}
                   onOpenThread={(messageId) => void openThreadForMessage(messageId)}
+                  userName={userName}
                 />
               ))
             )}

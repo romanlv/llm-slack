@@ -1,6 +1,6 @@
 
 # next
-- [ ] user profile/user name
+- [x] user profile/user name
 - [x] delete chat
 - [x] delete message
 - [x] edit message

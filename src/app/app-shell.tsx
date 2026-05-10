@@ -31,7 +31,11 @@ import {
   type ConversationThread,
   type ParentChat,
 } from '@/features/chat/repository'
-import { getSettings } from '@/features/settings/settings-repository'
+import {
+  DEFAULT_USER_NAME,
+  getSettings,
+  userInitials,
+} from '@/features/settings/settings-repository'
 import { cn } from '@/lib/utils'
 
 function formatUpdatedAt(timestamp: number) {
@@ -283,6 +287,8 @@ export function AppShell() {
   const activeParentChat = activeChatId
     ? parentChats.find((chat) => chat.id === activeChatId)
     : undefined
+  const userName = settings?.userName ?? DEFAULT_USER_NAME
+  const avatarDataUrl = settings?.avatarDataUrl
   const messagesById = new Map(
     branchRootMessages
       .filter((message): message is ChatMessage => Boolean(message))
@@ -476,6 +482,26 @@ export function AppShell() {
           </div>
 
           <div className="border-t border-sidebar-line p-3">
+            <Link
+              className="mb-3 flex items-center gap-2 rounded-md px-2 py-1.5 text-sidebar-fg transition hover:bg-sidebar-hover hover:text-white"
+              to="/profile"
+            >
+              {avatarDataUrl ? (
+                <img
+                  alt={`${userName} avatar`}
+                  className="size-7 shrink-0 rounded bg-yellow object-cover"
+                  src={avatarDataUrl}
+                />
+              ) : (
+                <span className="flex size-7 shrink-0 items-center justify-center rounded bg-yellow font-mono text-meta font-black text-sidebar">
+                  {userInitials(userName)}
+                </span>
+              )}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-tab font-semibold">{userName}</span>
+                <span className="block font-mono text-meta text-sidebar-fg-dim">local profile</span>
+              </span>
+            </Link>
             <div
               className={cn(
                 'mb-3 inline-flex items-center gap-1 rounded px-2 py-1 text-pill font-medium',

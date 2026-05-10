@@ -4,6 +4,7 @@ import { AppShell } from '@/app/app-shell'
 import { ChatPage } from '@/pages/chat-page'
 import { ChatThreadPage } from '@/pages/chat-thread-page'
 import { HomePage } from '@/pages/home-page'
+import { ProfilePage } from '@/pages/profile-page'
 import { SettingsPage } from '@/pages/settings-page'
 
 const rootRoute = createRootRoute({
@@ -34,10 +35,17 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 })
 
+const profileRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/profile',
+  component: ProfilePage,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   chatRoute,
   chatThreadRoute,
+  profileRoute,
   settingsRoute,
 ])
 

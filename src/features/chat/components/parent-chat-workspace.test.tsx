@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatMessage, ConversationThread, ParentChat } from '@/features/chat/domain'
 import { db } from '@/features/chat/repository'
 import { sendParentChatTurn } from '@/features/chat/send-turn'
+import { saveSettings } from '@/features/settings/settings-repository'
 
 import { ParentChatWorkspace } from './parent-chat-workspace'
 
@@ -174,6 +175,17 @@ describe('ParentChatWorkspace', () => {
       expect(writeText).toHaveBeenCalledWith('Copy me please')
     })
     expect(screen.queryByRole('menuitem')).not.toBeInTheDocument()
+  })
+
+  it('renders user messages with the configured local profile name', async () => {
+    await saveSettings({ userName: 'Ada Lovelace' })
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ content: 'Profile check' }))
+
+    render(<ParentChatWorkspace chatId="parent-1" />)
+
+    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument()
+    expect(screen.getByText('AL')).toBeInTheDocument()
   })
 
   it('edits a user message via the actions menu and persists the change', async () => {
