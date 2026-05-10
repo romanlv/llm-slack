@@ -207,9 +207,10 @@ describe('ParentChatWorkspace', () => {
       const stored = await db.messages.get('m1')
       expect(stored?.content).toBe('revised draft')
       expect(stored?.editedAt).toBeGreaterThan(0)
-    })
-    expect(await screen.findByText('revised draft')).toBeInTheDocument()
-    expect(screen.getByText('(edited)')).toBeInTheDocument()
+      expect(screen.queryByDisplayValue('revised draft')).not.toBeInTheDocument()
+      expect(screen.getByText('revised draft')).toBeInTheDocument()
+      expect(screen.getByText('(edited)')).toBeInTheDocument()
+    }, { timeout: 3000 })
   })
 
   it('does not offer Edit on assistant messages', async () => {
