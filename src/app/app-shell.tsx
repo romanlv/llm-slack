@@ -222,6 +222,7 @@ export function AppShell() {
   const { activeChatId, activeThreadId } = parseChatPath(location.pathname)
 
   const settings = useLiveQuery(() => getSettings(), [], undefined)
+  const savedMessageCount = useLiveQuery(() => db.savedMessages.count(), [], 0)
   const parentChats = useLiveQuery(
     () => db.parentChats.orderBy('updatedAt').reverse().toArray(),
     [],
@@ -342,12 +343,20 @@ export function AppShell() {
 
           <div className="min-h-0 flex-1 overflow-y-auto py-3">
             <div className="px-2">
-              <button className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-body font-medium text-white transition hover:bg-sidebar-hover">
+              <Link
+                className={cn(
+                  'flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-body font-medium text-white transition hover:bg-sidebar-hover',
+                  location.pathname === '/saved' ? 'bg-sidebar-active' : '',
+                )}
+                to="/saved"
+              >
                 <Bookmark className="size-4" />
                 <span className="flex-1">Saved for later</span>
                 <span className="font-mono text-meta text-sidebar-fg-dim">private</span>
-                <span className="rounded bg-white/10 px-1.5 font-mono text-meta font-semibold text-sidebar-chip">3</span>
-              </button>
+                <span className="rounded bg-white/10 px-1.5 font-mono text-meta font-semibold text-sidebar-chip">
+                  {savedMessageCount}
+                </span>
+              </Link>
             </div>
 
             <section className="mt-5">

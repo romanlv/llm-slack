@@ -1,8 +1,8 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, KeyboardEvent, ReactNode, RefCallback } from 'react'
 import Dexie from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Link, useNavigate } from '@tanstack/react-router'
+import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import {
   Bookmark,
   ChevronDown,
@@ -38,6 +38,7 @@ import {
   setParentChatModel,
   setThreadModel,
   togglePinnedMessage,
+  toggleSavedMessage,
   type ChatMessage,
   type ConversationThread,
   type PinnedMessageWithMessage,
@@ -326,26 +327,31 @@ function MessageBlock({
   active,
   compact,
   isPinned,
+  isSaved,
   message,
   onOpenThread,
   onSelect,
   onTogglePin,
+  onToggleSaved,
   avatarDataUrl,
   userName,
 }: {
   active?: boolean
   compact?: boolean
   isPinned: boolean
+  isSaved: boolean
   message: ChatMessage
   onOpenThread: (messageId: string) => void
   onSelect?: () => void
   onTogglePin: (messageId: string) => Promise<void>
+  onToggleSaved: (messageId: string) => Promise<void>
   avatarDataUrl?: string
   userName: string
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [pinning, setPinning] = useState(false)
+  const [saving, setSaving] = useState(false)
   const replyCount = message.directReplyCount
   const hasReplies = replyCount > 0
   const isError = message.status === 'error'
@@ -372,6 +378,19 @@ function MessageBlock({
       await onTogglePin(message.id)
     } finally {
       setPinning(false)
+    }
+  }
+
+  const handleToggleSaved = async () => {
+    if (saving) {
+      return
+    }
+
+    setSaving(true)
+    try {
+      await onToggleSaved(message.id)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -437,6 +456,12 @@ function MessageBlock({
               pinned
             </span>
           ) : null}
+          {isSaved ? (
+            <span className="inline-flex items-center gap-1 font-mono text-meta font-bold text-accent">
+              <Bookmark className="size-3" />
+              saved
+            </span>
+          ) : null}
         </div>
 
         {editing ? (
@@ -483,10 +508,15 @@ function MessageBlock({
           branch
         </button>
         <button
-          aria-label="Save message"
-          className="border-r border-line px-2 py-1 font-mono text-pill text-ink-muted opacity-50"
-          disabled
-          title="Saved messages are not implemented yet."
+          aria-label={isSaved ? 'Remove from saved' : 'Save message'}
+          aria-pressed={isSaved}
+          className={cn(
+            'border-r border-line px-2 py-1 font-mono text-pill transition hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-60',
+            isSaved ? 'bg-accent-soft text-accent' : 'text-ink-muted',
+          )}
+          disabled={saving}
+          onClick={() => void handleToggleSaved()}
+          title={isSaved ? 'Remove from saved' : 'Save for later'}
           type="button"
         >
           <Bookmark className="size-3" />
@@ -762,6 +792,15 @@ function ChannelHeader({
         : 'border-transparent text-ink-muted hover:text-ink',
     )
 
+  const titleInputRef = useRef<HTMLInputElement>(null)
+  const [draftTitle, setDraftTitle] = useState(title)
+
+  useEffect(() => {
+    if (document.activeElement !== titleInputRef.current) {
+      setDraftTitle(title)
+    }
+  }, [title])
+
   return (
     <header className="border-b border-line bg-surface">
       <div className="flex items-center gap-2.5 px-5 pb-1.5 pt-2.5">
@@ -769,8 +808,13 @@ function ChannelHeader({
           <span className="font-mono text-body text-ink-dim">#</span>
           <input
             className="min-w-0 flex-1 border-0 bg-transparent text-title font-bold leading-tight tracking-tight text-ink outline-none"
-            onChange={(event) => onRename(event.target.value)}
-            value={title}
+            onBlur={() => setDraftTitle(title)}
+            onChange={(event) => {
+              setDraftTitle(event.target.value)
+              onRename(event.target.value)
+            }}
+            ref={titleInputRef}
+            value={draftTitle}
           />
         </div>
         <div className="hidden items-baseline gap-3 font-mono text-pill sm:flex">
@@ -944,6 +988,7 @@ function SmartMessageScrollPane({
 
 export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspaceProps) {
   const navigate = useNavigate()
+  const location = useLocation()
   const [parentError, setParentError] = useState<string | null>(null)
   const [threadError, setThreadError] = useState<string | null>(null)
   const [sendingParent, setSendingParent] = useState(false)
@@ -966,6 +1011,14 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
     () => listPinnedMessagesForParentChat(chatId),
     [chatId],
     [] as PinnedMessageWithMessage[],
+  )
+  const savedMessageIds = useLiveQuery(
+    async () => {
+      const rows = await db.savedMessages.where('parentChatId').equals(chatId).toArray()
+      return new Set(rows.map((row) => row.messageId))
+    },
+    [chatId],
+    new Set<string>(),
   )
   const branchCount = useLiveQuery(
     () => db.threads.where('parentChatId').equals(chatId).count(),
@@ -1034,6 +1087,21 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
       behavior: 'smooth',
     })
   }
+
+  useEffect(() => {
+    const hash = location.hash
+    if (!hash) {
+      return
+    }
+
+    const prefix = 'message-row-'
+    const target = hash.startsWith('#') ? hash.slice(1) : hash
+    if (!target.startsWith(prefix)) {
+      return
+    }
+
+    pendingMessageJumpRef.current = target.slice(prefix.length)
+  }, [location.hash])
 
   useLayoutEffect(() => {
     const pendingMessageId = pendingMessageJumpRef.current
@@ -1115,6 +1183,24 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
       await togglePinnedMessage(messageId)
     } catch (error) {
       setThreadError(error instanceof Error ? error.message : 'Could not update pinned message.')
+    }
+  }
+
+  const toggleParentSaved = async (messageId: string) => {
+    setParentError(null)
+    try {
+      await toggleSavedMessage(messageId)
+    } catch (error) {
+      setParentError(error instanceof Error ? error.message : 'Could not update saved message.')
+    }
+  }
+
+  const toggleThreadSaved = async (messageId: string) => {
+    setThreadError(null)
+    try {
+      await toggleSavedMessage(messageId)
+    } catch (error) {
+      setThreadError(error instanceof Error ? error.message : 'Could not update saved message.')
     }
   }
 
@@ -1208,11 +1294,13 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
                   active
                   avatarDataUrl={avatarDataUrl}
                   isPinned
+                  isSaved={savedMessageIds.has(pin.message.id)}
                   key={pin.id}
                   message={pin.message}
                   onOpenThread={(messageId) => void openThreadForMessage(messageId)}
                   onSelect={() => void openPinnedMessage(pin)}
                   onTogglePin={toggleParentPin}
+                  onToggleSaved={toggleParentSaved}
                   userName={userName}
                 />
               ))
@@ -1227,10 +1315,12 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
                 avatarDataUrl={avatarDataUrl}
                 active={parentPinnedMessageIds.has(message.id)}
                 isPinned={parentPinnedMessageIds.has(message.id)}
+                isSaved={savedMessageIds.has(message.id)}
                 key={message.id}
                 message={message}
                 onOpenThread={(messageId) => void openThreadForMessage(messageId)}
                 onTogglePin={toggleParentPin}
+                onToggleSaved={toggleParentSaved}
                 userName={userName}
               />
             ))
@@ -1307,10 +1397,12 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
                   active={threadPinnedMessageIds.has(message.id)}
                   compact
                   isPinned={threadPinnedMessageIds.has(message.id)}
+                  isSaved={savedMessageIds.has(message.id)}
                   key={message.id}
                   message={message}
                   onOpenThread={(messageId) => void openThreadForMessage(messageId)}
                   onTogglePin={toggleThreadPin}
+                  onToggleSaved={toggleThreadSaved}
                   userName={userName}
                 />
               ))

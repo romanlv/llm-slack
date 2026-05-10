@@ -10,6 +10,7 @@ import {
   type ParentChat,
   type PinnedMessage,
   type ProviderUsage,
+  type SavedMessage,
   type ThreadAncestor,
 } from '@/features/chat/domain'
 import { db } from '@/features/chat/database'
@@ -25,6 +26,7 @@ export {
   type ParentChat,
   type PinnedMessage,
   type ProviderUsage,
+  type SavedMessage,
   type ThreadAncestor,
 }
 
@@ -32,6 +34,13 @@ export { db }
 
 export type PinnedMessageWithMessage = PinnedMessage & {
   message: ChatMessage
+}
+
+export type SavedMessageWithContext = SavedMessage & {
+  message: ChatMessage
+  parentChat: ParentChat
+  thread?: ConversationThread
+  threadRootMessage?: ChatMessage
 }
 
 export async function createParentChat(input?: Partial<Pick<ParentChat, 'model' | 'title'>>) {
@@ -128,23 +137,25 @@ export async function deleteParentChat(parentChatId: string) {
   const threads = await db.threads.where('parentChatId').equals(parentChatId).toArray()
   const threadIds = threads.map((thread) => thread.id)
 
-  await db.transaction('rw', db.parentChats, db.threads, db.messages, db.pinnedMessages, async () => {
-    if (threadIds.length > 0) {
+  await db.transaction(
+    'rw',
+    [db.parentChats, db.threads, db.messages, db.pinnedMessages, db.savedMessages],
+    async () => {
+      if (threadIds.length > 0) {
+        await db.messages.where('conversationId').anyOf(threadIds).delete()
+      }
+
       await db.messages
-        .where('conversationId')
-        .anyOf(threadIds)
+        .where('[conversationId+createdAt]')
+        .between([parentChatId, Dexie.minKey], [parentChatId, Dexie.maxKey])
         .delete()
-    }
 
-    await db.messages
-      .where('[conversationId+createdAt]')
-      .between([parentChatId, Dexie.minKey], [parentChatId, Dexie.maxKey])
-      .delete()
-
-    await db.threads.where('parentChatId').equals(parentChatId).delete()
-    await db.pinnedMessages.where('parentChatId').equals(parentChatId).delete()
-    await db.parentChats.delete(parentChatId)
-  })
+      await db.threads.where('parentChatId').equals(parentChatId).delete()
+      await db.pinnedMessages.where('parentChatId').equals(parentChatId).delete()
+      await db.savedMessages.where('parentChatId').equals(parentChatId).delete()
+      await db.parentChats.delete(parentChatId)
+    },
+  )
 }
 
 export async function setParentChatModel(parentChatId: string, model: string) {
@@ -433,6 +444,131 @@ async function hydratePinnedMessages(pins: PinnedMessage[]) {
   })
 }
 
+export async function saveMessage(messageId: string) {
+  return db.transaction(
+    'rw',
+    db.parentChats,
+    db.threads,
+    db.messages,
+    db.savedMessages,
+    async () => {
+      const message = await db.messages.get(messageId)
+      if (!message) {
+        throw new Error('Message not found.')
+      }
+
+      await assertMessageConversationIsValid(message)
+
+      const existing = await db.savedMessages.where('messageId').equals(message.id).first()
+      if (existing) {
+        return existing
+      }
+
+      const saved: SavedMessage = {
+        id: crypto.randomUUID(),
+        parentChatId: message.parentChatId,
+        conversationType: message.conversationType,
+        conversationId: message.conversationId,
+        messageId: message.id,
+        createdAt: Date.now(),
+      }
+
+      await db.savedMessages.add(saved)
+      return saved
+    },
+  )
+}
+
+export async function unsaveMessage(messageId: string) {
+  const existing = await db.savedMessages.where('messageId').equals(messageId).first()
+  if (!existing) {
+    return false
+  }
+
+  await db.savedMessages.delete(existing.id)
+  return true
+}
+
+export async function toggleSavedMessage(messageId: string) {
+  const existing = await db.savedMessages.where('messageId').equals(messageId).first()
+
+  if (existing) {
+    await db.savedMessages.delete(existing.id)
+    return { saved: false as const, savedMessage: undefined }
+  }
+
+  const savedMessage = await saveMessage(messageId)
+  return { saved: true as const, savedMessage }
+}
+
+export async function listSavedMessages(): Promise<SavedMessageWithContext[]> {
+  const saved = await db.savedMessages.orderBy('createdAt').reverse().toArray()
+  if (saved.length === 0) {
+    return []
+  }
+
+  const messageIds = saved.map((entry) => entry.messageId)
+  const parentChatIds = Array.from(new Set(saved.map((entry) => entry.parentChatId)))
+  const threadIds = Array.from(
+    new Set(
+      saved
+        .filter((entry) => entry.conversationType === 'thread')
+        .map((entry) => entry.conversationId),
+    ),
+  )
+
+  const [messageRows, parentChatRows, threadRows] = await Promise.all([
+    db.messages.bulkGet(messageIds),
+    db.parentChats.bulkGet(parentChatIds),
+    db.threads.bulkGet(threadIds),
+  ])
+
+  const presentMessages = messageRows.filter(
+    (entry): entry is ChatMessage => Boolean(entry),
+  )
+  const presentParentChats = parentChatRows.filter(
+    (entry): entry is ParentChat => Boolean(entry),
+  )
+  const presentThreads = threadRows.filter(
+    (entry): entry is ConversationThread => Boolean(entry),
+  )
+  const messagesById = new Map(presentMessages.map((entry) => [entry.id, entry] as const))
+  const parentChatsById = new Map(
+    presentParentChats.map((entry) => [entry.id, entry] as const),
+  )
+  const threadsById = new Map(presentThreads.map((entry) => [entry.id, entry] as const))
+
+  const threadRootIds = Array.from(
+    new Set(presentThreads.map((entry) => entry.rootMessageId)),
+  )
+  const threadRootRows = threadRootIds.length > 0 ? await db.messages.bulkGet(threadRootIds) : []
+  const threadRootsById = new Map(
+    threadRootRows
+      .filter((entry): entry is ChatMessage => Boolean(entry))
+      .map((entry) => [entry.id, entry] as const),
+  )
+
+  return saved.flatMap<SavedMessageWithContext>((entry) => {
+    const message = messagesById.get(entry.messageId)
+    const parentChat = parentChatsById.get(entry.parentChatId)
+    if (
+      !message ||
+      !parentChat ||
+      message.parentChatId !== entry.parentChatId ||
+      message.conversationType !== entry.conversationType ||
+      message.conversationId !== entry.conversationId
+    ) {
+      return []
+    }
+
+    const thread =
+      entry.conversationType === 'thread' ? threadsById.get(entry.conversationId) : undefined
+    const threadRootMessage = thread ? threadRootsById.get(thread.rootMessageId) : undefined
+
+    return [{ ...entry, message, parentChat, thread, threadRootMessage }]
+  })
+}
+
 export async function updateParentChatActivity(
   parentChatId: string,
   preview: string,
@@ -637,15 +773,23 @@ export async function deleteMessage(messageId: string) {
   const owningThreadId =
     target.conversationType === 'thread' ? target.conversationId : undefined
 
-  await db.transaction('rw', db.messages, db.threads, db.pinnedMessages, async () => {
-    if (cascade.messageIds.length > 0) {
-      await db.messages.bulkDelete(cascade.messageIds)
-      await db.pinnedMessages.where('messageId').anyOf(cascade.messageIds).delete()
-    }
-    if (cascade.threadIds.length > 0) {
-      await db.threads.bulkDelete(cascade.threadIds)
-    }
-  })
+  await db.transaction(
+    'rw',
+    db.messages,
+    db.threads,
+    db.pinnedMessages,
+    db.savedMessages,
+    async () => {
+      if (cascade.messageIds.length > 0) {
+        await db.messages.bulkDelete(cascade.messageIds)
+        await db.pinnedMessages.where('messageId').anyOf(cascade.messageIds).delete()
+        await db.savedMessages.where('messageId').anyOf(cascade.messageIds).delete()
+      }
+      if (cascade.threadIds.length > 0) {
+        await db.threads.bulkDelete(cascade.threadIds)
+      }
+    },
+  )
 
   if (owningThreadId) {
     await syncRootReplyCountForThread(owningThreadId)

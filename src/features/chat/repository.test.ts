@@ -14,9 +14,13 @@ import {
   getThreadConversation,
   listPinnedMessagesForConversation,
   listPinnedMessagesForParentChat,
+  listSavedMessages,
   pinMessage,
+  saveMessage,
   syncRootReplyCountForThread,
+  toggleSavedMessage,
   togglePinnedMessage,
+  unsaveMessage,
 } from './repository'
 
 function parentChat(overrides: Partial<ParentChat> = {}): ParentChat {
@@ -412,6 +416,146 @@ describe('thread repository semantics', () => {
     await expect(db.pinnedMessages.count()).resolves.toBe(0)
   })
 
+  it('saves a message idempotently and prevents duplicate saves across conversations', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'p1', content: 'parent message', createdAt: 10 }))
+    const thread = await getOrCreateThreadForMessage('p1')
+    await db.messages.add(
+      message({
+        id: 't1',
+        conversationType: 'thread',
+        conversationId: thread.id,
+        content: 'thread message',
+        createdAt: 20,
+      }),
+    )
+
+    vi.spyOn(Date, 'now').mockReturnValue(4321)
+
+    const first = await saveMessage('p1')
+    const second = await saveMessage('p1')
+    const threadSave = await saveMessage('t1')
+
+    expect(second.id).toBe(first.id)
+    expect(first).toMatchObject({
+      parentChatId: 'parent-1',
+      conversationType: 'parent',
+      conversationId: 'parent-1',
+      messageId: 'p1',
+      createdAt: 4321,
+    })
+    expect(threadSave).toMatchObject({
+      conversationType: 'thread',
+      conversationId: thread.id,
+      messageId: 't1',
+    })
+    await expect(db.savedMessages.count()).resolves.toBe(2)
+  })
+
+  it('toggles a saved message off and lists newest-first across chats', async () => {
+    await db.parentChats.bulkAdd([parentChat(), parentChat({ id: 'parent-2', title: 'Other' })])
+    await db.messages.bulkAdd([
+      message({ id: 'p1', content: 'first', createdAt: 10 }),
+      message({
+        id: 'p2',
+        parentChatId: 'parent-2',
+        conversationId: 'parent-2',
+        content: 'second',
+        createdAt: 20,
+      }),
+    ])
+
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(100)
+    const firstToggle = await toggleSavedMessage('p1')
+    dateNow.mockReturnValue(200)
+    const secondToggle = await toggleSavedMessage('p2')
+
+    expect(firstToggle).toMatchObject({ saved: true })
+    expect(secondToggle).toMatchObject({ saved: true })
+
+    const initial = await listSavedMessages()
+    expect(initial.map((entry) => entry.messageId)).toEqual(['p2', 'p1'])
+    expect(initial[0].parentChat.id).toBe('parent-2')
+    expect(initial[1].parentChat.id).toBe('parent-1')
+
+    const off = await toggleSavedMessage('p1')
+    expect(off).toMatchObject({ saved: false })
+    await expect(unsaveMessage('p1')).resolves.toBe(false)
+
+    const afterToggle = await listSavedMessages()
+    expect(afterToggle.map((entry) => entry.messageId)).toEqual(['p2'])
+  })
+
+  it('drops orphaned saved entries and resolves thread context', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'root', content: 'root', createdAt: 10 }))
+    const thread = await getOrCreateThreadForMessage('root')
+    await db.messages.add(
+      message({
+        id: 't1',
+        conversationType: 'thread',
+        conversationId: thread.id,
+        content: 'inside thread',
+        createdAt: 20,
+      }),
+    )
+
+    await saveMessage('t1')
+
+    await db.savedMessages.add({
+      id: 'orphan',
+      parentChatId: 'parent-1',
+      conversationType: 'parent',
+      conversationId: 'parent-1',
+      messageId: 'missing',
+      createdAt: 5,
+    })
+
+    const list = await listSavedMessages()
+    expect(list).toHaveLength(1)
+    expect(list[0].messageId).toBe('t1')
+    expect(list[0].thread?.id).toBe(thread.id)
+    expect(list[0].threadRootMessage?.id).toBe('root')
+    expect(list[0].parentChat.id).toBe('parent-1')
+  })
+
+  it('clears saved entries when their message is deleted via cascade', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'root', content: 'root', createdAt: 10 }))
+    const thread = await getOrCreateThreadForMessage('root')
+    await db.messages.add(
+      message({
+        id: 't1',
+        conversationType: 'thread',
+        conversationId: thread.id,
+        createdAt: 20,
+      }),
+    )
+
+    await saveMessage('root')
+    await saveMessage('t1')
+    await expect(db.savedMessages.count()).resolves.toBe(2)
+
+    await deleteMessage('root')
+
+    await expect(db.savedMessages.count()).resolves.toBe(0)
+  })
+
+  it('clears saved entries scoped to a parent chat when it is deleted', async () => {
+    await db.parentChats.bulkAdd([parentChat(), parentChat({ id: 'parent-2', title: 'Other' })])
+    await db.messages.bulkAdd([
+      message({ id: 'p1' }),
+      message({ id: 'p2', parentChatId: 'parent-2', conversationId: 'parent-2' }),
+    ])
+    await saveMessage('p1')
+    await saveMessage('p2')
+
+    await deleteParentChat('parent-1')
+
+    const remaining = await db.savedMessages.toArray()
+    expect(remaining.map((entry) => entry.messageId)).toEqual(['p2'])
+  })
+
   it('migrates version 1 data by adding the pinned messages table', async () => {
     const databaseName = `deepchat-migration-${crypto.randomUUID()}`
 
@@ -434,6 +578,7 @@ describe('thread repository semantics', () => {
     await expect(migratedDb.parentChats.get('parent-1')).resolves.toBeDefined()
     await expect(migratedDb.messages.get('p1')).resolves.toBeDefined()
     await expect(migratedDb.pinnedMessages.count()).resolves.toBe(0)
+    await expect(migratedDb.savedMessages.count()).resolves.toBe(0)
     await migratedDb.pinnedMessages.add({
       id: 'pin-1',
       parentChatId: 'parent-1',
@@ -443,7 +588,69 @@ describe('thread repository semantics', () => {
       pinnedAt: 10,
       sortKey: 10,
     })
+    await migratedDb.savedMessages.add({
+      id: 'saved-1',
+      parentChatId: 'parent-1',
+      conversationType: 'parent',
+      conversationId: 'parent-1',
+      messageId: 'p1',
+      createdAt: 11,
+    })
     await expect(migratedDb.pinnedMessages.count()).resolves.toBe(1)
+    await expect(migratedDb.savedMessages.count()).resolves.toBe(1)
+
+    migratedDb.close()
+    await migratedDb.delete()
+  })
+
+  it('migrates version 2 data by adding the saved messages table', async () => {
+    const databaseName = `deepchat-migration-v2-${crypto.randomUUID()}`
+
+    const legacyDb = new Dexie(databaseName)
+    legacyDb.version(1).stores({
+      parentChats: 'id, createdAt, updatedAt, archivedAt',
+      threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+      messages:
+        'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+      settings: 'id',
+    })
+    legacyDb.version(2).stores({
+      parentChats: 'id, createdAt, updatedAt, archivedAt',
+      threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+      messages:
+        'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+      pinnedMessages:
+        'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+      settings: 'id',
+    })
+    await legacyDb.open()
+    await legacyDb.table('parentChats').add(parentChat())
+    await legacyDb.table('messages').add(message({ id: 'p1' }))
+    await legacyDb.table('pinnedMessages').add({
+      id: 'pin-1',
+      parentChatId: 'parent-1',
+      conversationType: 'parent',
+      conversationId: 'parent-1',
+      messageId: 'p1',
+      pinnedAt: 10,
+      sortKey: 10,
+    })
+    legacyDb.close()
+
+    const migratedDb = new DeepchatDatabase(databaseName)
+    await migratedDb.open()
+
+    await expect(migratedDb.pinnedMessages.count()).resolves.toBe(1)
+    await expect(migratedDb.savedMessages.count()).resolves.toBe(0)
+    await migratedDb.savedMessages.add({
+      id: 'saved-1',
+      parentChatId: 'parent-1',
+      conversationType: 'parent',
+      conversationId: 'parent-1',
+      messageId: 'p1',
+      createdAt: 99,
+    })
+    await expect(migratedDb.savedMessages.count()).resolves.toBe(1)
 
     migratedDb.close()
     await migratedDb.delete()

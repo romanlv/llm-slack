@@ -5,6 +5,7 @@ import type {
   ConversationThread,
   ParentChat,
   PinnedMessage,
+  SavedMessage,
 } from '@/features/chat/domain'
 import type { AppSettings } from '@/features/settings/settings-repository'
 
@@ -13,6 +14,7 @@ export class DeepchatDatabase extends Dexie {
   threads!: EntityTable<ConversationThread, 'id'>
   messages!: EntityTable<ChatMessage, 'id'>
   pinnedMessages!: EntityTable<PinnedMessage, 'id'>
+  savedMessages!: EntityTable<SavedMessage, 'id'>
   settings!: EntityTable<AppSettings, 'id'>
 
   constructor(name = 'deepchat-threaded') {
@@ -33,6 +35,18 @@ export class DeepchatDatabase extends Dexie {
         'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
       pinnedMessages:
         'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+      settings: 'id',
+    })
+
+    this.version(3).stores({
+      parentChats: 'id, createdAt, updatedAt, archivedAt',
+      threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+      messages:
+        'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+      pinnedMessages:
+        'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+      savedMessages:
+        'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
       settings: 'id',
     })
   }

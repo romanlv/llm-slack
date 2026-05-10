@@ -5,6 +5,7 @@ import { ChatPage } from '@/pages/chat-page'
 import { ChatThreadPage } from '@/pages/chat-thread-page'
 import { HomePage } from '@/pages/home-page'
 import { ProfilePage } from '@/pages/profile-page'
+import { SavedMessagesPage } from '@/pages/saved-messages-page'
 import { SettingsPage } from '@/pages/settings-page'
 
 const rootRoute = createRootRoute({
@@ -41,11 +42,18 @@ const profileRoute = createRoute({
   component: ProfilePage,
 })
 
+const savedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/saved',
+  component: SavedMessagesPage,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   chatRoute,
   chatThreadRoute,
   profileRoute,
+  savedRoute,
   settingsRoute,
 ])
 

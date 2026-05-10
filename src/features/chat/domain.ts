@@ -68,6 +68,17 @@ export interface PinnedMessage {
   note?: string
 }
 
+export interface SavedMessage {
+  id: string
+  parentChatId: string
+  conversationType: ConversationType
+  conversationId: string
+  messageId: string
+  messageRevisionId?: string
+  createdAt: number
+  note?: string
+}
+
 export interface ThreadAncestor {
   thread: ConversationThread
   rootMessage: ChatMessage

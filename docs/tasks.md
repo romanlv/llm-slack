@@ -5,7 +5,7 @@
 - [x] delete message
 - [x] edit message
 - [x] markdown support
-- [ ] saved messages (per-message bookmark + sidebar collection)
+- [x] saved messages (per-message bookmark + sidebar collection)
 - [x] pinned messages (per-message pin)
 - [x] message actions menu (the per-message ⋯ button)
 - [x] copy message
@@ -27,4 +27,7 @@
 - [ ] branch map / tree visualization (sidebar "map ↗", header GitFork)
 - [ ] reply-in-thread composer mode toggle
 - [ ] channel-level pins (distinct from per-message pins)
-- [ ]
+- [ ] reactions to messages with emojis 
+- [ ] search
+- [ ] all conversations 
+- [ ] projects?  workspaces are projects
