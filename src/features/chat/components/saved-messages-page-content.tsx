@@ -179,7 +179,7 @@ export function SavedMessagesPageContent() {
         </p>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto bg-white px-5 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-surface px-5 py-4">
         {savedMessages.length === 0 ? (
           <div className="mx-auto max-w-md rounded border border-dashed border-line-strong bg-surface-muted px-4 py-8 text-center text-small leading-6 text-ink-muted">
             No saved messages yet. Use the bookmark action on any message to keep it here.

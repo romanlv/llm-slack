@@ -1397,7 +1397,7 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
         />
 
         <SmartMessageScrollPane
-          className="row-start-3 min-h-0 overflow-y-auto bg-white py-2"
+          className="row-start-3 min-h-0 overflow-y-auto bg-surface py-2"
           contentKey={parentScrollContentKeyForActiveTab}
           resetKey={`${chatId}:${parentTab}`}
         >

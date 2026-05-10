@@ -54,7 +54,7 @@ export function ModelPicker({
         <button
           aria-expanded={editing}
           aria-controls={description ? descriptionId : undefined}
-          className="inline-flex items-center gap-2 rounded-full border border-border bg-white/70 px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-white hover:text-foreground"
+          className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-hover hover:text-foreground"
           onClick={() => setEditing((value) => !value)}
           type="button"
         >
@@ -63,7 +63,7 @@ export function ModelPicker({
         </button>
       </div>
       <button
-        className="flex min-h-11 w-full min-w-0 items-center justify-between gap-3 rounded-2xl border border-input bg-white/80 px-4 py-2 text-left text-sm font-normal text-foreground transition hover:bg-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring"
+        className="flex min-h-11 w-full min-w-0 items-center justify-between gap-3 rounded-2xl border border-input bg-surface px-4 py-2 text-left text-sm font-normal text-foreground transition hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring"
         onClick={() => setEditing((value) => !value)}
         type="button"
       >
@@ -78,7 +78,7 @@ export function ModelPicker({
             Pick a ranked model
           </label>
           <select
-            className="flex h-10 w-full rounded-2xl border border-input bg-white/80 px-3 py-2 text-sm font-normal text-foreground outline-none transition focus-visible:ring-4 focus-visible:ring-ring"
+            className="flex h-10 w-full rounded-2xl border border-input bg-surface px-3 py-2 text-sm font-normal text-foreground outline-none transition focus-visible:ring-4 focus-visible:ring-ring"
             id={selectId}
             onChange={(event) => {
               if (event.target.value !== 'custom') {
