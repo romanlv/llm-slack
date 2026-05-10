@@ -6,6 +6,7 @@ import { defineConfig } from 'vitest/config'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: process.env.GITHUB_PAGES === 'true' ? '/llm-slack/' : '/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

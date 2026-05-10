@@ -125,6 +125,21 @@ pnpm typecheck
 pnpm lint
 ```
 
+## Deployment
+
+Merges to `main` deploy automatically to GitHub Pages through
+[.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml).
+
+The workflow installs dependencies, runs typecheck/lint/tests, builds the Vite
+app with the `/llm-slack/` base path, adds a `404.html` SPA fallback, and
+publishes the `dist/` artifact with GitHub Pages.
+
+The expected Pages URL is:
+
+```text
+https://romanlv.github.io/llm-slack/
+```
+
 ## Project Layout
 
 ```text
