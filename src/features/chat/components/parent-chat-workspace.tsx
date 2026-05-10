@@ -1,24 +1,31 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import type { ChangeEvent, FormEvent, KeyboardEvent, ReactNode } from 'react'
+import type { ChangeEvent, FormEvent, KeyboardEvent, ReactNode, RefCallback } from 'react'
 import Dexie from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useNavigate } from '@tanstack/react-router'
 import {
   Bookmark,
   ChevronDown,
+  Copy,
   GitBranch,
   GitFork,
   LoaderCircle,
   MoreHorizontal,
   Paperclip,
+  Pencil,
   Pin,
   SendHorizonal,
+  Trash2,
   X,
 } from 'lucide-react'
+
+import { Menu, MenuItem } from '@/components/ui/menu'
 
 import { sendParentChatTurn, sendThreadTurn } from '@/features/chat/send-turn'
 import {
   db,
+  deleteMessage,
+  editMessageContent,
   getThreadAncestorChain,
   getOrCreateThreadForMessage,
   getRootMessageForThread,
@@ -199,6 +206,124 @@ function Avatar({ message }: { message: ChatMessage }) {
   )
 }
 
+async function copyMessageContent(content: string) {
+  if (!navigator.clipboard) {
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(content)
+  } catch {
+    // Clipboard access can be denied; ignore so the menu still closes.
+  }
+}
+
+function MessageEditor({
+  initialValue,
+  onCancel,
+  onSave,
+}: {
+  initialValue: string
+  onCancel: () => void
+  onSave: (value: string) => Promise<void>
+}) {
+  const [value, setValue] = useState(initialValue)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+  useLayoutEffect(() => {
+    const element = textareaRef.current
+    if (!element) {
+      return
+    }
+
+    element.focus()
+    const length = element.value.length
+    element.setSelectionRange(length, length)
+  }, [])
+
+  useLayoutEffect(() => {
+    const element = textareaRef.current
+    if (!element) {
+      return
+    }
+
+    element.style.height = '0px'
+    const nextHeight = Math.min(Math.max(element.scrollHeight, 60), 320)
+    element.style.height = `${nextHeight}px`
+  }, [value])
+
+  const submit = async () => {
+    if (saving) {
+      return
+    }
+
+    if (!value.trim()) {
+      setError('Message cannot be empty.')
+      return
+    }
+
+    if (value === initialValue) {
+      onCancel()
+      return
+    }
+
+    setError(null)
+    setSaving(true)
+
+    try {
+      await onSave(value)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not save edit.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="rounded border border-accent-border bg-surface p-2">
+      <textarea
+        className="min-h-[60px] w-full resize-none border-0 bg-transparent text-body text-ink outline-none"
+        disabled={saving}
+        onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setValue(event.target.value)}
+        onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            onCancel()
+            return
+          }
+
+          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault()
+            void submit()
+          }
+        }}
+        ref={textareaRef}
+        value={value}
+      />
+      {error ? <p className="mb-1 text-meta text-danger">{error}</p> : null}
+      <div className="mt-1 flex items-center justify-end gap-1.5">
+        <button
+          className="rounded border border-line bg-surface px-2 py-0.5 font-mono text-pill text-ink-muted transition hover:bg-surface-muted disabled:opacity-50"
+          disabled={saving}
+          onClick={onCancel}
+          type="button"
+        >
+          Cancel
+        </button>
+        <button
+          className="rounded bg-send px-2.5 py-0.5 font-mono text-pill font-bold text-white transition hover:bg-send-hover disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={saving || !value.trim()}
+          onClick={() => void submit()}
+          type="button"
+        >
+          {saving ? 'Saving' : 'Save'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function MessageBlock({
   active,
   compact,
@@ -210,9 +335,23 @@ function MessageBlock({
   message: ChatMessage
   onOpenThread: (messageId: string) => void
 }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
   const replyCount = message.directReplyCount
   const hasReplies = replyCount > 0
   const isError = message.status === 'error'
+  const canEdit = message.role === 'user' && message.status !== 'streaming'
+
+  const handleDelete = async () => {
+    const cascadeWarning = hasReplies
+      ? `This message has ${replyCount} ${replyCount === 1 ? 'reply' : 'replies'} in a branch. Deleting it removes the branch and any replies.`
+      : 'Delete this message?'
+    if (!window.confirm(cascadeWarning)) {
+      return
+    }
+
+    await deleteMessage(message.id)
+  }
 
   return (
     <article
@@ -243,9 +382,23 @@ function MessageBlock({
           {isError ? (
             <span className="font-mono text-meta font-bold text-danger">error</span>
           ) : null}
+          {message.editedAt ? (
+            <span className="font-mono text-meta text-ink-dim">(edited)</span>
+          ) : null}
         </div>
 
-        <MessageText content={message.content} streaming={message.status === 'streaming'} />
+        {editing ? (
+          <MessageEditor
+            initialValue={message.content}
+            onCancel={() => setEditing(false)}
+            onSave={async (next) => {
+              await editMessageContent(message.id, next)
+              setEditing(false)
+            }}
+          />
+        ) : (
+          <MessageText content={message.content} streaming={message.status === 'streaming'} />
+        )}
 
         {message.error ? (
           <p className="mt-2 text-meta leading-5 text-danger">{message.error}</p>
@@ -263,7 +416,12 @@ function MessageBlock({
         ) : null}
       </div>
 
-      <div className="absolute right-4 -top-3 hidden overflow-hidden rounded border border-line-strong bg-surface shadow-[0_2px_6px_rgba(0,0,0,0.08)] group-hover:flex">
+      <div
+        className={cn(
+          'absolute right-4 -top-3 overflow-hidden rounded border border-line-strong bg-surface shadow-[0_2px_6px_rgba(0,0,0,0.08)]',
+          menuOpen ? 'flex' : 'hidden group-hover:flex',
+        )}
+      >
         <button
           className="inline-flex items-center gap-1 border-r border-line px-2 py-1 font-mono text-pill font-bold text-accent transition hover:bg-accent-soft"
           onClick={() => onOpenThread(message.id)}
@@ -278,9 +436,58 @@ function MessageBlock({
         <button className="border-r border-line px-2 py-1 font-mono text-pill text-ink-muted transition hover:bg-surface-muted" type="button">
           <Pin className="size-3" />
         </button>
-        <button className="px-2 py-1 font-mono text-pill text-ink-muted transition hover:bg-surface-muted" type="button">
-          <MoreHorizontal className="size-3" />
-        </button>
+        <Menu
+          onOpenChange={setMenuOpen}
+          open={menuOpen}
+          trigger={(triggerProps) => (
+            <button
+              aria-expanded={triggerProps['aria-expanded']}
+              aria-haspopup={triggerProps['aria-haspopup']}
+              aria-label="Message actions"
+              className="px-2 py-1 font-mono text-pill text-ink-muted transition hover:bg-surface-muted"
+              onClick={triggerProps.onClick}
+              ref={triggerProps.ref as RefCallback<HTMLButtonElement>}
+              type="button"
+            >
+              <MoreHorizontal className="size-3" />
+            </button>
+          )}
+        >
+          {({ close }) => (
+            <>
+              <MenuItem
+                onSelect={() => {
+                  void copyMessageContent(message.content)
+                  close()
+                }}
+              >
+                <Copy className="size-3.5 text-ink-muted" />
+                Copy message
+              </MenuItem>
+              {canEdit ? (
+                <MenuItem
+                  onSelect={() => {
+                    setEditing(true)
+                    close()
+                  }}
+                >
+                  <Pencil className="size-3.5 text-ink-muted" />
+                  Edit message
+                </MenuItem>
+              ) : null}
+              <MenuItem
+                destructive
+                onSelect={() => {
+                  void handleDelete()
+                  close()
+                }}
+              >
+                <Trash2 className="size-3.5" />
+                Delete message
+              </MenuItem>
+            </>
+          )}
+        </Menu>
       </div>
     </article>
   )

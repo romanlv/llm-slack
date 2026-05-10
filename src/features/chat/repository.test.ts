@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { ChatMessage, ParentChat } from './domain'
 import {
   db,
+  deleteMessage,
   deleteParentChat,
+  editMessageContent,
   getOrCreateThreadForMessage,
   getThreadConversation,
   syncRootReplyCountForThread,
@@ -130,6 +132,94 @@ describe('thread repository semantics', () => {
     await syncRootReplyCountForThread(thread.id)
 
     await expect(db.messages.get('root')).resolves.toMatchObject({ directReplyCount: 2 })
+  })
+
+  it('edits a message, trims content, stamps editedAt, and rejects empty input', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'm1', content: 'original', createdAt: 10 }))
+
+    vi.spyOn(Date, 'now').mockReturnValue(987)
+
+    const updated = await editMessageContent('m1', '   updated body   ')
+
+    expect(updated).toMatchObject({ content: 'updated body', editedAt: 987 })
+    await expect(editMessageContent('m1', '   ')).rejects.toThrow(/empty/i)
+    await expect(editMessageContent('missing', 'x')).rejects.toThrow(/not found/i)
+
+    const noOp = await editMessageContent('m1', 'updated body')
+    expect(noOp?.editedAt).toBe(987)
+  })
+
+  it('cascade-deletes a thread root message along with rooted threads and their messages', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'root', content: 'root', createdAt: 10 }))
+    await db.messages.add(message({ id: 'sibling', content: 'sibling', createdAt: 20 }))
+
+    const thread = await getOrCreateThreadForMessage('root')
+    await db.messages.bulkAdd([
+      message({
+        id: 't1',
+        conversationType: 'thread',
+        conversationId: thread.id,
+        content: 'thread message',
+        createdAt: 30,
+      }),
+      message({
+        id: 't2',
+        conversationType: 'thread',
+        conversationId: thread.id,
+        content: 'nested-root candidate',
+        createdAt: 40,
+      }),
+    ])
+    const nested = await getOrCreateThreadForMessage('t2')
+    await db.messages.add(
+      message({
+        id: 'n1',
+        conversationType: 'thread',
+        conversationId: nested.id,
+        content: 'inside nested thread',
+        createdAt: 50,
+      }),
+    )
+
+    await deleteMessage('root')
+
+    await expect(db.messages.get('root')).resolves.toBeUndefined()
+    await expect(db.messages.get('t1')).resolves.toBeUndefined()
+    await expect(db.messages.get('t2')).resolves.toBeUndefined()
+    await expect(db.messages.get('n1')).resolves.toBeUndefined()
+    await expect(db.threads.get(thread.id)).resolves.toBeUndefined()
+    await expect(db.threads.get(nested.id)).resolves.toBeUndefined()
+    await expect(db.messages.get('sibling')).resolves.toBeDefined()
+  })
+
+  it('decrements the parent thread reply count when a message inside a thread is deleted', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'root', content: 'root', createdAt: 10 }))
+    const thread = await getOrCreateThreadForMessage('root')
+    await db.messages.bulkAdd([
+      message({
+        id: 't1',
+        conversationType: 'thread',
+        conversationId: thread.id,
+        createdAt: 20,
+      }),
+      message({
+        id: 't2',
+        conversationType: 'thread',
+        conversationId: thread.id,
+        createdAt: 30,
+      }),
+    ])
+    await syncRootReplyCountForThread(thread.id)
+    await expect(db.messages.get('root')).resolves.toMatchObject({ directReplyCount: 2 })
+
+    await deleteMessage('t1')
+
+    await expect(db.messages.get('t1')).resolves.toBeUndefined()
+    await expect(db.messages.get('root')).resolves.toMatchObject({ directReplyCount: 1 })
+    await expect(db.threads.get(thread.id)).resolves.toBeDefined()
   })
 
   it('deletes a parent chat with all owned threads and messages in one cascade', async () => {

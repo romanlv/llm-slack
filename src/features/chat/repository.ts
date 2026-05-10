@@ -420,6 +420,89 @@ export async function getThreadConversation(threadId: string) {
   ]
 }
 
+export async function editMessageContent(messageId: string, content: string) {
+  const trimmed = content.trim()
+  if (!trimmed) {
+    throw new Error('Message content cannot be empty.')
+  }
+
+  const existing = await db.messages.get(messageId)
+  if (!existing) {
+    throw new Error('Message not found.')
+  }
+
+  if (existing.content === trimmed) {
+    return existing
+  }
+
+  await db.messages.update(messageId, {
+    content: trimmed,
+    editedAt: Date.now(),
+  })
+
+  const updated = await db.messages.get(messageId)
+  return updated
+}
+
+async function collectCascadeForMessage(messageId: string) {
+  const messageIds = new Set<string>()
+  const threadIds = new Set<string>()
+  const queue: string[] = [messageId]
+
+  while (queue.length > 0) {
+    const current = queue.shift() as string
+    if (messageIds.has(current)) {
+      continue
+    }
+    messageIds.add(current)
+
+    const rootedThreads = await db.threads.where('rootMessageId').equals(current).toArray()
+    for (const thread of rootedThreads) {
+      if (threadIds.has(thread.id)) {
+        continue
+      }
+      threadIds.add(thread.id)
+
+      const threadMessages = await db.messages
+        .where('[conversationId+createdAt]')
+        .between([thread.id, Dexie.minKey], [thread.id, Dexie.maxKey])
+        .primaryKeys()
+
+      for (const childId of threadMessages) {
+        if (typeof childId === 'string') {
+          queue.push(childId)
+        }
+      }
+    }
+  }
+
+  return { messageIds: [...messageIds], threadIds: [...threadIds] }
+}
+
+export async function deleteMessage(messageId: string) {
+  const target = await db.messages.get(messageId)
+  if (!target) {
+    return
+  }
+
+  const cascade = await collectCascadeForMessage(messageId)
+  const owningThreadId =
+    target.conversationType === 'thread' ? target.conversationId : undefined
+
+  await db.transaction('rw', db.messages, db.threads, async () => {
+    if (cascade.messageIds.length > 0) {
+      await db.messages.bulkDelete(cascade.messageIds)
+    }
+    if (cascade.threadIds.length > 0) {
+      await db.threads.bulkDelete(cascade.threadIds)
+    }
+  })
+
+  if (owningThreadId) {
+    await syncRootReplyCountForThread(owningThreadId)
+  }
+}
+
 export async function syncRootReplyCountForThread(threadId: string) {
   const thread = await db.threads.get(threadId)
   if (!thread) {

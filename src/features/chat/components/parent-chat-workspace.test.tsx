@@ -154,4 +154,96 @@ describe('ParentChatWorkspace', () => {
       },
     })
   })
+
+  it('copies the message content from the per-message actions menu', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ content: 'Copy me please' }))
+
+    render(<ParentChatWorkspace chatId="parent-1" />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Message actions' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /copy message/i }))
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('Copy me please')
+    })
+    expect(screen.queryByRole('menuitem')).not.toBeInTheDocument()
+  })
+
+  it('edits a user message via the actions menu and persists the change', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'm1', content: 'first draft' }))
+
+    render(<ParentChatWorkspace chatId="parent-1" />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Message actions' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /edit message/i }))
+
+    const textarea = await screen.findByDisplayValue('first draft')
+    await userEvent.clear(textarea)
+    await userEvent.type(textarea, 'revised draft')
+    await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(async () => {
+      const stored = await db.messages.get('m1')
+      expect(stored?.content).toBe('revised draft')
+      expect(stored?.editedAt).toBeGreaterThan(0)
+    })
+    expect(await screen.findByText('revised draft')).toBeInTheDocument()
+    expect(screen.getByText('(edited)')).toBeInTheDocument()
+  })
+
+  it('does not offer Edit on assistant messages', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'a1', role: 'assistant', content: 'AI reply' }))
+
+    render(<ParentChatWorkspace chatId="parent-1" />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Message actions' }))
+
+    expect(await screen.findByRole('menuitem', { name: /copy message/i })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /edit message/i })).not.toBeInTheDocument()
+  })
+
+  it('deletes a confirmed message and removes it from the chat', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await db.parentChats.add(parentChat())
+    await db.messages.bulkAdd([
+      message({ id: 'm1', content: 'goodbye', createdAt: 1 }),
+      message({ id: 'm2', content: 'still here', createdAt: 2 }),
+    ])
+
+    render(<ParentChatWorkspace chatId="parent-1" />)
+
+    const triggers = await screen.findAllByRole('button', { name: 'Message actions' })
+    await userEvent.click(triggers[0])
+    await userEvent.click(await screen.findByRole('menuitem', { name: /delete message/i }))
+
+    await waitFor(async () => {
+      await expect(db.messages.get('m1')).resolves.toBeUndefined()
+    })
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(screen.queryByText('goodbye')).not.toBeInTheDocument()
+    expect(screen.getByText('still here')).toBeInTheDocument()
+  })
+
+  it('aborts deletion when the confirmation prompt is dismissed', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'm1', content: 'keep me' }))
+
+    render(<ParentChatWorkspace chatId="parent-1" />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Message actions' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /delete message/i }))
+
+    await expect(db.messages.get('m1')).resolves.toBeDefined()
+    expect(screen.getByText('keep me')).toBeInTheDocument()
+  })
 })

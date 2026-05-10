@@ -53,6 +53,7 @@ export interface ChatMessage {
   providerRequestId?: string
   providerUsage?: ProviderUsage
   error?: string
+  editedAt?: number
 }
 
 export interface ThreadAncestor {

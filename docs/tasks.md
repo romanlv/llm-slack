@@ -2,15 +2,19 @@
 # next
 - [ ] user profile/user name
 - [ ] delete chat
-- [ ] delete message
-- [ ] edit message
+- [x] delete message
+- [x] edit message
 - [ ] markdown support
 - [ ] saved messages (per-message bookmark + sidebar collection)
 - [ ] pinned messages (per-message pin)
-- [ ] message actions menu (the per-message ⋯ button)
-- [ ] copy message
+- [x] message actions menu (the per-message ⋯ button)
+- [x] copy message
 - [ ] retry failed assistant message
 - [ ] regenerate assistant reply
+- [ ] claude code oauth token provider
+- [ ] codex oauth token provider
+- [ ] onboarding - setup your name profile
+- [ ] free models from open router
 
 # planned
 - [ ] defining agents (model + prompt + tools)
@@ -21,4 +25,4 @@
 - [ ] branch map / tree visualization (sidebar "map ↗", header GitFork)
 - [ ] reply-in-thread composer mode toggle
 - [ ] channel-level pins (distinct from per-message pins)
-- [ ] 
+- [ ]
