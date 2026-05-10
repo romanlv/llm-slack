@@ -1,8 +1,27 @@
+import type { ProviderConnection } from '@/features/providers/entities'
+import type { ModelRef } from '@/features/providers/model-ref'
 import type {
+  CatalogEntry,
   ChatProviderUsage,
-  StreamChatCompletionInput,
-  StreamChatCompletionResult,
+  ProviderAdapter,
+  StreamChatInput,
+  StreamChatResult,
 } from '@/features/providers/provider-contract'
+
+// Curated short list. Long-tail OpenRouter models go through modelOverrides
+// via the "Add custom model" UI rather than fetched dynamically.
+const BUNDLED: CatalogEntry[] = [
+  { providerModelId: 'tencent/hy3-preview:free', name: 'Hy3 Preview (free)' },
+  { providerModelId: 'moonshotai/kimi-k2.6', name: 'Kimi K2.6' },
+  { providerModelId: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
+  { providerModelId: 'anthropic/claude-opus-4.7', name: 'Claude Opus 4.7' },
+  { providerModelId: 'google/gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
+  { providerModelId: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+  { providerModelId: 'deepseek/deepseek-v3.2', name: 'DeepSeek V3.2' },
+  { providerModelId: 'deepseek/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
+  { providerModelId: 'minimax/minimax-m2.7', name: 'MiniMax M2.7' },
+  { providerModelId: 'x-ai/grok-4.1-fast', name: 'Grok 4.1 Fast' },
+]
 
 type OpenRouterStreamChoice = {
   delta?: { content?: unknown }
@@ -58,15 +77,11 @@ function toTextContent(content: unknown) {
   if (Array.isArray(content)) {
     return content
       .map((part) => {
-        if (typeof part === 'string') {
-          return part
-        }
-
+        if (typeof part === 'string') return part
         if (part && typeof part === 'object' && 'text' in part) {
           const text = (part as { text?: unknown }).text
           return typeof text === 'string' ? text : ''
         }
-
         return ''
       })
       .join('')
@@ -86,39 +101,36 @@ function getErrorMessage(payload: unknown, status: number) {
   return `OpenRouter request failed with status ${status}.`
 }
 
-export async function sendOpenRouterChat({
-  apiKey,
-  messages,
-  model,
-  onChunk,
-  onMessageId,
-  siteName,
-  siteUrl,
-}: StreamChatCompletionInput): Promise<StreamChatCompletionResult> {
+async function streamChat(
+  connection: ProviderConnection,
+  model: ModelRef,
+  input: StreamChatInput,
+): Promise<StreamChatResult> {
+  const siteUrl = connection.metadata?.siteUrl
+  const siteName = connection.metadata?.siteName
+
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${connection.apiKey}`,
       'Content-Type': 'application/json',
       ...(siteUrl ? { 'HTTP-Referer': siteUrl } : {}),
       ...(siteName ? { 'X-Title': siteName } : {}),
     },
     body: JSON.stringify({
-      model,
-      messages,
+      model: model.providerModelId,
+      messages: input.messages,
       stream: true,
     }),
   })
 
   if (!response.ok) {
     let payload: unknown
-
     try {
       payload = await response.json()
     } catch {
       payload = undefined
     }
-
     throw new Error(getErrorMessage(payload, response.status))
   }
 
@@ -171,7 +183,7 @@ export async function sendOpenRouterChat({
 
       if (!requestId && typeof payload.id === 'string') {
         requestId = payload.id
-        onMessageId?.(requestId)
+        input.onMessageId?.(requestId)
       }
 
       usage = normalizeUsage(payload.usage) ?? usage
@@ -182,10 +194,16 @@ export async function sendOpenRouterChat({
 
       if (content) {
         fullText += content
-        onChunk(content)
+        input.onChunk(content)
       }
     }
   }
 
   return { content: fullText, id: requestId, usage }
+}
+
+export const openrouterAdapter: ProviderAdapter = {
+  kind: 'openrouter',
+  bundledCatalog: () => BUNDLED,
+  streamChat,
 }

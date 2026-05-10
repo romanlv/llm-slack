@@ -6,6 +6,7 @@ import {
   Archive,
   ArchiveRestore,
   Bookmark,
+  ExternalLink,
   GitBranch,
   Hash,
   KeyRound,
@@ -35,6 +36,7 @@ import {
   type ConversationThread,
   type ParentChat,
 } from '@/features/chat/repository'
+import { getFirstProviderOfKind } from '@/features/providers/providers-repository'
 import {
   DEFAULT_USER_NAME,
   getSettings,
@@ -253,6 +255,11 @@ export function AppShell() {
   const { activeChatId, activeThreadId } = parseChatPath(location.pathname)
 
   const settings = useLiveQuery(() => getSettings(), [], undefined)
+  const openRouterProvider = useLiveQuery(
+    () => getFirstProviderOfKind('openrouter'),
+    [],
+    undefined,
+  )
   const savedMessageCount = useLiveQuery(() => db.savedMessages.count(), [], 0)
   const parentChats = useLiveQuery(
     () => db.parentChats.orderBy('updatedAt').reverse().toArray(),
@@ -333,7 +340,7 @@ export function AppShell() {
     : undefined
   const userName = settings?.userName ?? DEFAULT_USER_NAME
   const avatarDataUrl = settings?.avatarDataUrl
-  const hasProviderKey = Boolean(settings?.openRouterApiKey?.trim())
+  const hasProviderKey = Boolean(openRouterProvider?.apiKey?.trim())
   const messagesById = new Map(
     branchRootMessages
       .filter((message): message is ChatMessage => Boolean(message))
@@ -572,16 +579,27 @@ export function AppShell() {
                 <span className="block font-mono text-meta text-sidebar-fg-dim">local profile</span>
               </span>
             </Link>
-            <Link
-              className={cn(
-                'mb-3 inline-flex items-center gap-1 rounded px-2 py-1 text-meta font-medium transition hover:opacity-90',
-                hasProviderKey ? 'bg-send-soft text-send' : 'bg-warn/15 text-warn',
-              )}
-              to="/settings"
-            >
-              <KeyRound className="size-3" />
-              {hasProviderKey ? 'Provider connected' : 'Connect a provider'}
-            </Link>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Link
+                className={cn(
+                  'inline-flex items-center gap-1 rounded px-2 py-1 text-meta font-medium transition hover:opacity-90',
+                  hasProviderKey ? 'bg-send-soft text-send' : 'bg-warn/15 text-warn',
+                )}
+                to="/settings"
+              >
+                <KeyRound className="size-3" />
+                {hasProviderKey ? 'Provider connected' : 'Connect a provider'}
+              </Link>
+              <a
+                className="inline-flex items-center gap-1 rounded px-2 py-1 text-meta font-medium text-sidebar-fg-muted transition hover:bg-sidebar-hover hover:text-white"
+                href="https://github.com/romanlv/llm-slack"
+                rel="noreferrer"
+                target="_blank"
+              >
+                <ExternalLink className="size-3" />
+                GitHub
+              </a>
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <Button className="h-9 justify-center rounded bg-sidebar-hover text-white hover:bg-white/15" onClick={handleNewParentChat}>
                 <MessageSquarePlus className="size-4" />

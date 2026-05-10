@@ -13,8 +13,10 @@ import {
   syncRootReplyCountForThread,
   updateMessage,
 } from '@/features/chat/repository'
+import type { ModelRef } from '@/features/providers/model-ref'
+import { resolveForSend, type ResolveForSendResult } from '@/features/providers/models-catalog'
+import { getAdapter } from '@/features/providers/registry'
 import { getSettings } from '@/features/settings/settings-repository'
-import { sendOpenRouterChat } from '@/features/providers/openrouter'
 
 const APPROX_CONTEXT_CHAR_LIMIT = 48_000
 
@@ -22,12 +24,30 @@ function normalizeErrorMessage(error: unknown) {
   if (error instanceof Error) {
     return error.message
   }
-
   return 'The request failed before a response completed.'
 }
 
 function estimateContextSize(messages: Array<{ content: string }>) {
   return messages.reduce((total, message) => total + message.content.length, 0)
+}
+
+async function resolveSendTarget(modelRef: ModelRef | null): Promise<ResolveForSendResult> {
+  const settings = await getSettings()
+  const resolved = await resolveForSend(modelRef, { settingsDefault: settings.defaultModel })
+
+  if (!resolved) {
+    throw new Error(
+      'No connected provider can serve the selected model. Connect a provider or pick a model in Settings.',
+    )
+  }
+
+  if (!resolved.connection.apiKey.trim()) {
+    throw new Error(
+      `Provider "${resolved.connection.label}" has no API key set. Update it in Settings before sending.`,
+    )
+  }
+
+  return resolved
 }
 
 export async function sendParentChatTurn(parentChatId: string, prompt: string) {
@@ -39,9 +59,11 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
     throw new Error('Archived conversations cannot accept new sends.')
   }
 
-  const runtimeSettings = await getSettings()
-  if (!runtimeSettings.openRouterApiKey.trim()) {
-    throw new Error('Connect a provider in Settings before sending.')
+  const resolved = await resolveSendTarget(parentChat.model ?? null)
+  const snapshot: ModelRef = {
+    providerId: resolved.connection.id,
+    providerKind: resolved.connection.kind,
+    providerModelId: resolved.model.providerModelId,
   }
 
   const trimmed = prompt.trim()
@@ -52,14 +74,14 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
     conversationId: parentChatId,
     parentChatId,
     prompt: trimmed,
-    model: parentChat.model,
+    model: snapshot,
   })
 
   const assistantMessage = await createAssistantMessage({
     conversationType: 'parent',
     conversationId: parentChatId,
     parentChatId,
-    model: parentChat.model,
+    model: snapshot,
   })
 
   try {
@@ -71,10 +93,9 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
     }
 
     let assistantContent = ''
+    const adapter = getAdapter(resolved.connection.kind)
 
-    const response = await sendOpenRouterChat({
-      apiKey: runtimeSettings.openRouterApiKey.trim(),
-      model: parentChat.model,
+    const response = await adapter.streamChat(resolved.connection, snapshot, {
       messages: conversation,
       onChunk: (chunk) => {
         assistantContent += chunk
@@ -86,8 +107,6 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
       onMessageId: (id) => {
         void updateMessage(assistantMessage.id, { providerRequestId: id })
       },
-      siteName: runtimeSettings.siteName,
-      siteUrl: runtimeSettings.siteUrl,
     })
 
     const finalContent = response.content.trim() || 'The provider returned an empty response.'
@@ -117,9 +136,11 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     throw new Error('Archived conversations cannot accept new sends.')
   }
 
-  const runtimeSettings = await getSettings()
-  if (!runtimeSettings.openRouterApiKey.trim()) {
-    throw new Error('Connect a provider in Settings before sending.')
+  const resolved = await resolveSendTarget(thread.model ?? parentChat.model ?? null)
+  const snapshot: ModelRef = {
+    providerId: resolved.connection.id,
+    providerKind: resolved.connection.kind,
+    providerModelId: resolved.model.providerModelId,
   }
 
   const trimmed = prompt.trim()
@@ -130,7 +151,7 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     conversationId: threadId,
     parentChatId: thread.parentChatId,
     prompt: trimmed,
-    model: thread.model,
+    model: snapshot,
   })
 
   await syncRootReplyCountForThread(threadId)
@@ -139,7 +160,7 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     conversationType: 'thread',
     conversationId: threadId,
     parentChatId: thread.parentChatId,
-    model: thread.model,
+    model: snapshot,
   })
 
   await syncRootReplyCountForThread(threadId)
@@ -153,10 +174,9 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     }
 
     let assistantContent = ''
+    const adapter = getAdapter(resolved.connection.kind)
 
-    const response = await sendOpenRouterChat({
-      apiKey: runtimeSettings.openRouterApiKey.trim(),
-      model: thread.model,
+    const response = await adapter.streamChat(resolved.connection, snapshot, {
       messages: conversation,
       onChunk: (chunk) => {
         assistantContent += chunk
@@ -168,8 +188,6 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
       onMessageId: (id) => {
         void updateMessage(assistantMessage.id, { providerRequestId: id })
       },
-      siteName: runtimeSettings.siteName,
-      siteUrl: runtimeSettings.siteUrl,
     })
 
     const finalContent = response.content.trim() || 'The provider returned an empty response.'

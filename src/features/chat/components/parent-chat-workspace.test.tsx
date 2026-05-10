@@ -9,6 +9,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatMessage, ConversationThread, ParentChat } from '@/features/chat/domain'
 import { db } from '@/features/chat/repository'
 import { sendParentChatTurn } from '@/features/chat/send-turn'
+import {
+  createProvider,
+  deleteProvider,
+  getFirstProviderOfKind,
+} from '@/features/providers/providers-repository'
 import { saveSettings } from '@/features/settings/settings-repository'
 
 import { ParentChatWorkspace } from './parent-chat-workspace'
@@ -42,11 +47,16 @@ vi.mock('@/features/chat/send-turn', () => ({
 
 const mockedSendParentChatTurn = vi.mocked(sendParentChatTurn)
 
+const TEST_MODEL_REF = {
+  providerKind: 'openrouter' as const,
+  providerModelId: 'openai/gpt-4o-mini',
+}
+
 function parentChat(overrides: Partial<ParentChat> = {}): ParentChat {
   return {
     id: 'parent-1',
     title: 'Planning',
-    model: 'openai/gpt-4o-mini',
+    model: TEST_MODEL_REF,
     createdAt: 1,
     updatedAt: 1,
     draft: '',
@@ -66,7 +76,7 @@ function message(overrides: Partial<ChatMessage>): ChatMessage {
     createdAt: 1,
     status: 'complete',
     directReplyCount: 0,
-    model: 'openai/gpt-4o-mini',
+    model: TEST_MODEL_REF,
     ...overrides,
   }
 }
@@ -78,17 +88,28 @@ function thread(overrides: Partial<ConversationThread> = {}): ConversationThread
     rootMessageId: 'message-1',
     depth: 1,
     draft: '',
-    model: 'openai/gpt-4o-mini',
+    model: TEST_MODEL_REF,
     createdAt: 2,
     updatedAt: 2,
     ...overrides,
   }
 }
 
+async function setOpenRouterKey(apiKey: string) {
+  const existing = await getFirstProviderOfKind('openrouter')
+  if (existing) {
+    await deleteProvider(existing.id)
+  }
+  if (apiKey) {
+    await createProvider({ kind: 'openrouter', label: 'OpenRouter', apiKey })
+  }
+}
+
 beforeEach(async () => {
   navigate.mockReset()
   mockedSendParentChatTurn.mockReset()
-  await saveSettings({ openRouterApiKey: 'test-key' })
+  await saveSettings({})
+  await setOpenRouterKey('test-key')
 })
 
 afterEach(() => {
@@ -115,7 +136,7 @@ describe('ParentChatWorkspace', () => {
   })
 
   it('disables SEND but keeps the textarea editable when no provider key is configured', async () => {
-    await saveSettings({ openRouterApiKey: '' })
+    await setOpenRouterKey('')
     await db.parentChats.add(parentChat({ draft: 'queued prompt' }))
 
     render(<ParentChatWorkspace chatId="parent-1" />)

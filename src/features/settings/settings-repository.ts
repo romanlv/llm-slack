@@ -1,5 +1,5 @@
 import { db } from '@/features/chat/database'
-import { DEFAULT_OPENROUTER_MODEL } from '@/features/providers/openrouter-models'
+import type { ModelRef } from '@/features/providers/model-ref'
 
 export type AppTheme = 'aubergine' | 'midnight' | 'paper'
 
@@ -27,20 +27,15 @@ export interface AppSettings {
   id: 'app'
   userName: string
   avatarDataUrl?: string
-  openRouterApiKey: string
-  defaultModel: string
-  siteUrl: string
-  siteName: string
+  defaultModel: ModelRef | null
   theme: AppTheme
+  onboardedAt?: number
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   id: 'app',
   userName: DEFAULT_USER_NAME,
-  openRouterApiKey: '',
-  defaultModel: DEFAULT_OPENROUTER_MODEL,
-  siteUrl: typeof window !== 'undefined' ? window.location.origin : '',
-  siteName: 'llm-slack',
+  defaultModel: null,
   theme: 'aubergine',
 }
 

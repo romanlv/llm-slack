@@ -8,6 +8,13 @@ import { Button } from '@/components/ui/button'
 import { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ModelPicker } from '@/features/model-selection/components/model-picker'
+import { openrouterAdapter } from '@/features/providers/adapters/openrouter'
+import { upsertOverride } from '@/features/providers/model-overrides-repository'
+import { DEFAULT_OPENROUTER_MODEL } from '@/features/providers/openrouter-models'
+import {
+  getFirstProviderOfKind,
+  upsertSingletonOpenRouter,
+} from '@/features/providers/providers-repository'
 import {
   APP_THEMES,
   DEFAULT_SETTINGS,
@@ -15,7 +22,6 @@ import {
   saveSettings,
   type AppTheme,
 } from '@/features/settings/settings-repository'
-import { DEFAULT_OPENROUTER_MODEL } from '@/features/providers/openrouter-models'
 import { cn } from '@/lib/utils'
 
 function ThemeSwatch({ theme }: { theme: AppTheme }) {
@@ -33,18 +39,48 @@ function ThemeSwatch({ theme }: { theme: AppTheme }) {
 
 export function SettingsPageContent() {
   const settings = useLiveQuery(() => getSettings(), [], DEFAULT_SETTINGS)
+  const openRouterProvider = useLiveQuery(
+    () => getFirstProviderOfKind('openrouter'),
+    [],
+    undefined,
+  )
   const [savedMessage, setSavedMessage] = useState('')
+
+  const apiKey = openRouterProvider?.apiKey ?? ''
+  const siteUrl = openRouterProvider?.metadata?.siteUrl ?? ''
+  const siteName = openRouterProvider?.metadata?.siteName ?? 'llm-slack'
+  const defaultModelId = settings?.defaultModel?.providerModelId ?? DEFAULT_OPENROUTER_MODEL
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const formData = new FormData(event.currentTarget)
 
+    const metadata: Record<string, string> = {}
+    const submittedSiteUrl = String(formData.get('siteUrl') ?? '').trim()
+    const submittedSiteName = String(formData.get('siteName') ?? '').trim() || 'llm-slack'
+    if (submittedSiteUrl) metadata.siteUrl = submittedSiteUrl
+    if (submittedSiteName) metadata.siteName = submittedSiteName
+
+    const provider = await upsertSingletonOpenRouter({
+      apiKey: String(formData.get('openRouterApiKey') ?? '').trim(),
+      metadata,
+    })
+
+    const modelId =
+      String(formData.get('defaultModel') ?? '').trim() || DEFAULT_OPENROUTER_MODEL
+    const isBundled = openrouterAdapter
+      .bundledCatalog()
+      .some((entry) => entry.providerModelId === modelId)
+    await upsertOverride(
+      { providerId: provider.id, providerModelId: modelId, enabled: true },
+      { isBundled },
+    )
     await saveSettings({
-      defaultModel:
-        String(formData.get('defaultModel') ?? '').trim() || DEFAULT_OPENROUTER_MODEL,
-      openRouterApiKey: String(formData.get('openRouterApiKey') ?? '').trim(),
-    siteName: String(formData.get('siteName') ?? '').trim() || 'llm-slack',
-      siteUrl: String(formData.get('siteUrl') ?? '').trim(),
+      defaultModel: {
+        providerId: provider.id,
+        providerKind: 'openrouter',
+        providerModelId: modelId,
+      },
     })
 
     setSavedMessage('Settings saved locally in IndexedDB.')
@@ -103,17 +139,13 @@ export function SettingsPageContent() {
 
         <form
           className="grid gap-4"
-          key={
-            settings
-              ? `${settings.defaultModel}:${settings.siteName}:${settings.siteUrl}:${settings.openRouterApiKey.length}`
-              : 'settings-loading'
-          }
+          key={`${defaultModelId}:${siteName}:${siteUrl}:${apiKey.length}`}
           onSubmit={handleSubmit}
         >
           <label className="grid gap-2">
             <span className="text-sm font-medium text-foreground">OpenRouter API key</span>
             <Input
-              defaultValue={settings?.openRouterApiKey ?? ''}
+              defaultValue={apiKey}
               name="openRouterApiKey"
               placeholder="sk-or-v1-..."
               type="password"
@@ -121,7 +153,7 @@ export function SettingsPageContent() {
           </label>
 
           <ModelPicker
-            defaultValue={settings?.defaultModel ?? DEFAULT_OPENROUTER_MODEL}
+            defaultValue={defaultModelId}
             description="Visible options are high-ranked OpenRouter models checked on April 23, 2026. You can still enter any valid model slug your provider accepts."
             label="Default model"
             name="defaultModel"
@@ -131,7 +163,7 @@ export function SettingsPageContent() {
             <label className="grid gap-2">
               <span className="text-sm font-medium text-foreground">App title header</span>
               <Input
-                defaultValue={settings?.siteName ?? 'llm-slack'}
+                defaultValue={siteName}
                 name="siteName"
                 placeholder="llm-slack"
               />
@@ -140,7 +172,7 @@ export function SettingsPageContent() {
             <label className="grid gap-2">
               <span className="text-sm font-medium text-foreground">Referer URL</span>
               <Input
-                defaultValue={settings?.siteUrl ?? ''}
+                defaultValue={siteUrl}
                 name="siteUrl"
                 placeholder="https://example.com"
               />

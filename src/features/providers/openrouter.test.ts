@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { sendOpenRouterChat } from './openrouter'
+import { openrouterAdapter } from './adapters/openrouter'
+import type { ProviderConnection } from './entities'
+import type { ModelRef } from './model-ref'
 
 function streamResponse(chunks: string[]) {
   const encoder = new TextEncoder()
@@ -16,6 +18,24 @@ function streamResponse(chunks: string[]) {
     }),
     { status: 200 },
   )
+}
+
+function connection(overrides: Partial<ProviderConnection> = {}): ProviderConnection {
+  return {
+    id: 'connection-1',
+    kind: 'openrouter',
+    label: 'OpenRouter',
+    apiKey: 'api-key',
+    metadata: { siteUrl: 'https://example.test', siteName: 'llm-slack' },
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  }
+}
+
+const MODEL_A: ModelRef = {
+  providerKind: 'openrouter',
+  providerModelId: 'model-a',
 }
 
 describe('OpenRouter provider adapter', () => {
@@ -36,12 +56,8 @@ describe('OpenRouter provider adapter', () => {
 
     const onChunk = vi.fn()
     const onMessageId = vi.fn()
-    const result = await sendOpenRouterChat({
-      apiKey: 'api-key',
-      model: 'model-a',
+    const result = await openrouterAdapter.streamChat(connection(), MODEL_A, {
       messages: [{ role: 'user', content: 'hello' }],
-      siteName: 'llm-slack',
-      siteUrl: 'https://example.test',
       onChunk,
       onMessageId,
     })
@@ -89,9 +105,7 @@ describe('OpenRouter provider adapter', () => {
     )
 
     await expect(
-      sendOpenRouterChat({
-        apiKey: 'bad-key',
-        model: 'model-a',
+      openrouterAdapter.streamChat(connection({ apiKey: 'bad-key' }), MODEL_A, {
         messages: [{ role: 'user', content: 'hello' }],
         onChunk: vi.fn(),
       }),

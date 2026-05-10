@@ -44,11 +44,16 @@ vi.mock('@tanstack/react-router', () => ({
   useLocation: () => location,
 }))
 
+const TEST_MODEL_REF = {
+  providerKind: 'openrouter' as const,
+  providerModelId: 'openai/gpt-4o-mini',
+}
+
 function parentChat(overrides: Partial<ParentChat> = {}): ParentChat {
   return {
     id: 'parent-1',
     title: 'Planning',
-    model: 'openai/gpt-4o-mini',
+    model: TEST_MODEL_REF,
     createdAt: 1,
     updatedAt: 1,
     draft: '',
@@ -68,7 +73,7 @@ function message(overrides: Partial<ChatMessage>): ChatMessage {
     createdAt: 1,
     status: 'complete',
     directReplyCount: 0,
-    model: 'openai/gpt-4o-mini',
+    model: TEST_MODEL_REF,
     ...overrides,
   }
 }
@@ -84,6 +89,15 @@ afterEach(() => {
 })
 
 describe('AppShell chat actions', () => {
+  it('links to the GitHub repository from the sidebar footer', async () => {
+    await db.parentChats.add(parentChat({ id: 'parent-1', title: 'Planning' }))
+
+    render(<AppShell />)
+
+    const link = await screen.findByRole('link', { name: /github/i }, { timeout: 3000 })
+    expect(link).toHaveAttribute('href', 'https://github.com/romanlv/llm-slack')
+  })
+
   it('deletes a chat from the sidebar menu after confirmation', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     await db.parentChats.bulkAdd([

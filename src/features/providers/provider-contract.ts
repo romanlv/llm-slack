@@ -1,9 +1,15 @@
-export type ChatProviderMessage = {
-  role: 'assistant' | 'system' | 'user'
+import type { ModelMetadata } from '@/features/providers/entities'
+import type { ProviderConnection } from '@/features/providers/entities'
+import type { ModelRef, ProviderKind } from '@/features/providers/model-ref'
+
+export type ChatMessageRole = 'assistant' | 'system' | 'user'
+
+export interface ChatProviderMessage {
+  role: ChatMessageRole
   content: string
 }
 
-export type ChatProviderUsage = {
+export interface ChatProviderUsage {
   provider: string
   promptTokens?: number
   completionTokens?: number
@@ -17,18 +23,28 @@ export type ChatProviderUsage = {
   raw?: unknown
 }
 
-export type StreamChatCompletionInput = {
-  apiKey: string
-  model: string
+export interface StreamChatInput {
   messages: ChatProviderMessage[]
-  siteName?: string
-  siteUrl?: string
   onChunk: (chunk: string) => void
   onMessageId?: (id: string) => void
 }
 
-export type StreamChatCompletionResult = {
+export interface StreamChatResult {
   content: string
   id: string
   usage?: ChatProviderUsage
+}
+
+export interface CatalogEntry extends ModelMetadata {
+  providerModelId: string
+}
+
+export interface ProviderAdapter {
+  kind: ProviderKind
+  bundledCatalog(): CatalogEntry[]
+  streamChat(
+    connection: ProviderConnection,
+    model: ModelRef,
+    input: StreamChatInput,
+  ): Promise<StreamChatResult>
 }

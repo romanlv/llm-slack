@@ -1,3 +1,5 @@
+import type { ModelRef } from '@/features/providers/model-ref'
+
 export type MessageRole = 'assistant' | 'system' | 'user'
 export type MessageStatus = 'complete' | 'error' | 'streaming'
 export type ConversationType = 'parent' | 'thread'
@@ -5,7 +7,7 @@ export type ConversationType = 'parent' | 'thread'
 export interface ParentChat {
   id: string
   title: string
-  model: string
+  model: ModelRef | null
   createdAt: number
   updatedAt: number
   archivedAt?: number
@@ -21,7 +23,7 @@ export interface ConversationThread {
   rootMessageId: string
   depth: number
   draft: string
-  model: string
+  model: ModelRef | null
   createdAt: number
   updatedAt: number
 }
@@ -50,7 +52,7 @@ export interface ChatMessage {
   createdAt: number
   status: MessageStatus
   directReplyCount: number
-  model?: string
+  model?: ModelRef
   providerRequestId?: string
   providerUsage?: ProviderUsage
   error?: string

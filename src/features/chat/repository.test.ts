@@ -30,11 +30,20 @@ import {
   unsaveMessage,
 } from './repository'
 
+const MODEL_PARENT = {
+  providerKind: 'openrouter' as const,
+  providerModelId: 'model-parent',
+}
+const MODEL_THREAD = {
+  providerKind: 'openrouter' as const,
+  providerModelId: 'model-thread',
+}
+
 function parentChat(overrides: Partial<ParentChat> = {}): ParentChat {
   return {
     id: 'parent-1',
     title: 'Parent',
-    model: 'model-parent',
+    model: MODEL_PARENT,
     createdAt: 1,
     updatedAt: 1,
     draft: '',
@@ -67,7 +76,7 @@ describe('thread repository semantics', () => {
     ])
 
     const thread = await getOrCreateThreadForMessage('parent-root')
-    await db.threads.update(thread.id, { model: 'model-thread' })
+    await db.threads.update(thread.id, { model: MODEL_THREAD })
     await db.messages.update('thread-root', { conversationId: thread.id })
 
     const nested = await getOrCreateThreadForMessage('thread-root')
@@ -77,14 +86,14 @@ describe('thread repository semantics', () => {
       parentThreadId: undefined,
       rootMessageId: 'parent-root',
       depth: 1,
-      model: 'model-parent',
+      model: MODEL_PARENT,
     })
     expect(nested).toMatchObject({
       parentChatId: 'parent-1',
       parentThreadId: thread.id,
       rootMessageId: 'thread-root',
       depth: 2,
-      model: 'model-thread',
+      model: MODEL_THREAD,
     })
   })
 

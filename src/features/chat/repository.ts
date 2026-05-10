@@ -14,6 +14,7 @@ import {
   type ThreadAncestor,
 } from '@/features/chat/domain'
 import { db } from '@/features/chat/database'
+import type { ModelRef } from '@/features/providers/model-ref'
 import { getSettings, type AppSettings } from '@/features/settings/settings-repository'
 
 export {
@@ -46,12 +47,11 @@ export type SavedMessageWithContext = SavedMessage & {
 let seedParentChatPromise: Promise<void> | null = null
 
 export async function createParentChat(input?: Partial<Pick<ParentChat, 'model' | 'title'>>) {
-  const settings = await getSettings()
   const now = Date.now()
   const chat: ParentChat = {
     id: crypto.randomUUID(),
     title: input?.title?.trim() || 'Untitled chat',
-    model: input?.model?.trim() || settings.defaultModel,
+    model: input?.model ?? null,
     createdAt: now,
     updatedAt: now,
     draft: '',
@@ -104,7 +104,7 @@ async function seedParentChatIfNeeded() {
     createdAt: Date.now(),
     status: 'complete',
     directReplyCount: 0,
-    model: parentChat.model,
+    model: parentChat.model ?? undefined,
   })
 
   await db.parentChats.update(parentChat.id, {
@@ -234,26 +234,16 @@ export async function countStartedBranchesForParentChat(parentChatId: string) {
   return rootRows.filter((row) => row && row.directReplyCount > 0).length
 }
 
-export async function setParentChatModel(parentChatId: string, model: string) {
-  const trimmed = model.trim()
-  if (!trimmed) {
-    return
-  }
-
+export async function setParentChatModel(parentChatId: string, model: ModelRef | null) {
   await db.parentChats.update(parentChatId, {
-    model: trimmed,
+    model,
     updatedAt: Date.now(),
   })
 }
 
-export async function setThreadModel(threadId: string, model: string) {
-  const trimmed = model.trim()
-  if (!trimmed) {
-    return
-  }
-
+export async function setThreadModel(threadId: string, model: ModelRef | null) {
   await db.threads.update(threadId, {
-    model: trimmed,
+    model,
     updatedAt: Date.now(),
   })
 }
@@ -293,7 +283,7 @@ export async function getOrCreateThreadForMessage(messageId: string) {
     rootMessageId: rootMessage.id,
     depth: parentThread ? parentThread.depth + 1 : 1,
     draft: '',
-    model: parentThread?.model ?? parentChat.model,
+    model: parentThread?.model ?? parentChat.model ?? null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   }
@@ -316,7 +306,7 @@ export async function appendUserMessage(input: {
   conversationId: string
   parentChatId: string
   prompt: string
-  model: string
+  model: ModelRef | undefined
 }) {
   const trimmed = input.prompt.trim()
   if (!trimmed) {
@@ -344,7 +334,7 @@ export async function createAssistantMessage(input: {
   conversationType: ConversationType
   conversationId: string
   parentChatId: string
-  model: string
+  model: ModelRef | undefined
 }) {
   const message: ChatMessage = {
     id: crypto.randomUUID(),

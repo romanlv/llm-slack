@@ -51,6 +51,8 @@ import {
   type ThreadAncestor,
 } from '@/features/chat/repository'
 import { OPENROUTER_TRENDING_MODELS } from '@/features/providers/openrouter-models'
+import type { ModelRef } from '@/features/providers/model-ref'
+import { getFirstProviderOfKind } from '@/features/providers/providers-repository'
 import {
   DEFAULT_USER_NAME,
   getSettings,
@@ -75,12 +77,13 @@ function formatTime(timestamp: number) {
   }).format(timestamp)
 }
 
-function modelShortName(model?: string) {
+function modelShortName(model?: ModelRef | null) {
   if (!model) {
     return undefined
   }
 
-  const known = OPENROUTER_TRENDING_MODELS.find((item) => item.id === model)
+  const id = model.providerModelId
+  const known = OPENROUTER_TRENDING_MODELS.find((item) => item.id === id)
   if (known) {
     return known.label
       .replace(/^Claude\s+/i, '')
@@ -88,7 +91,14 @@ function modelShortName(model?: string) {
       .replace(/^Google\s+/i, '')
   }
 
-  return model.split('/').at(-1)?.replace(/claude-/i, '') ?? model
+  return id.split('/').at(-1)?.replace(/claude-/i, '') ?? id
+}
+
+function shortNameForModelId(id?: string) {
+  if (!id) {
+    return undefined
+  }
+  return modelShortName({ providerKind: 'openrouter', providerModelId: id })
 }
 
 function branchLabel(message?: ChatMessage) {
@@ -619,10 +629,10 @@ function MiniModelSelect({
       >
         {OPENROUTER_TRENDING_MODELS.map((model) => (
           <option key={model.id} value={model.id}>
-            {modelShortName(model.id)}
+            {shortNameForModelId(model.id)}
           </option>
         ))}
-        {!inKnownList ? <option value={value}>{modelShortName(value)}</option> : null}
+        {!inKnownList ? <option value={value}>{shortNameForModelId(value)}</option> : null}
       </select>
       <ChevronDown className="size-2.5 text-ink-dim" />
     </label>
@@ -1164,7 +1174,27 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
   )
   const parentScrollContentKeyForActiveTab =
     parentTab === 'pinned' ? parentPinnedScrollContentKey : parentScrollContentKey
-  const hasProviderKey = Boolean(settings?.openRouterApiKey?.trim())
+  const openRouterProvider = useLiveQuery(
+    () => getFirstProviderOfKind('openrouter'),
+    [],
+    undefined,
+  )
+  const hasProviderKey = Boolean(openRouterProvider?.apiKey?.trim())
+  const settingsDefaultModelId = settings?.defaultModel?.providerModelId
+
+  function modelIdFromRef(ref: ModelRef | null | undefined) {
+    return ref?.providerModelId ?? settingsDefaultModelId ?? ''
+  }
+
+  function refFromPickerString(value: string): ModelRef | null {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    return {
+      providerId: openRouterProvider?.id,
+      providerKind: 'openrouter',
+      providerModelId: trimmed,
+    }
+  }
 
   function jumpToMessage(messageId: string) {
     const element = document.getElementById(messageElementId(messageId))
@@ -1426,9 +1456,11 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
               sendingParent ||
               Boolean(parentChat.archivedAt)
             }
-            model={parentChat.model}
+            model={modelIdFromRef(parentChat.model)}
             onChange={(value) => void saveParentDraft(parentChat.id, value)}
-            onModelChange={(model) => void setParentChatModel(parentChat.id, model)}
+            onModelChange={(model) =>
+              void setParentChatModel(parentChat.id, refFromPickerString(model))
+            }
             onSubmit={handleParentSubmit}
             placeholder="Ask anything, or /branch to fork this convo..."
             submitDisabled={!hasProviderKey}
@@ -1540,12 +1572,14 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
                 sendingThreadId === activeThread.id ||
                 Boolean(parentChat.archivedAt)
               }
-              model={activeThread?.model ?? parentChat.model}
+              model={modelIdFromRef(activeThread?.model ?? parentChat.model)}
               onChange={(value) =>
                 activeThread ? void saveThreadDraft(activeThread.id, value) : undefined
               }
               onModelChange={(model) =>
-                activeThread ? void setThreadModel(activeThread.id, model) : undefined
+                activeThread
+                  ? void setThreadModel(activeThread.id, refFromPickerString(model))
+                  : undefined
               }
               onSubmit={handleThreadSubmit}
               placeholder="Continue this branch, or /branch to fork again..."

@@ -5,7 +5,8 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { getSettings } from './settings-repository'
+import { getFirstProviderOfKind } from '@/features/providers/providers-repository'
+
 import { SettingsPageContent } from './settings-page-content'
 
 afterEach(() => {
@@ -22,7 +23,8 @@ describe('SettingsPageContent', () => {
     await userEvent.click(screen.getByRole('button', { name: /save settings/i }))
 
     await waitFor(async () => {
-      await expect(getSettings()).resolves.toMatchObject({ openRouterApiKey: 'sk-test' })
+      const provider = await getFirstProviderOfKind('openrouter')
+      expect(provider?.apiKey).toBe('sk-test')
     })
   })
 })

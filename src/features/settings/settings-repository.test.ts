@@ -15,16 +15,12 @@ describe('settings repository', () => {
   it('merges profile defaults into older settings rows', async () => {
     await db.settings.put({
       id: 'app',
-      openRouterApiKey: 'key',
-      defaultModel: 'model-a',
-      siteUrl: 'https://example.com',
-      siteName: 'llm-slack',
       theme: 'paper',
+      defaultModel: null,
     } as typeof DEFAULT_SETTINGS)
 
     await expect(getSettings()).resolves.toMatchObject({
       userName: DEFAULT_USER_NAME,
-      openRouterApiKey: 'key',
       theme: 'paper',
     })
   })
