@@ -22,6 +22,13 @@ describe('chat domain text derivation', () => {
     expect(previewText('  hello\n\nthere\tfriend  ')).toBe('hello there friend')
     expect(titleFromPrompt('x'.repeat(60))).toBe(`${'x'.repeat(49)}...`)
   })
+
+  it('strips markdown syntax when deriving previews', () => {
+    expect(previewText('# Heading\n**bold** and *italic*')).toBe('Heading bold and italic')
+    expect(previewText('see [docs](https://example.com) for more')).toBe('see docs for more')
+    expect(previewText('- one\n- two\n- three')).toBe('one two three')
+    expect(previewText('use `code` here')).toBe('use code here')
+  })
 })
 
 describe('messageToTransport', () => {

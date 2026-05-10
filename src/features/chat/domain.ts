@@ -62,7 +62,22 @@ export interface ThreadAncestor {
 }
 
 export function previewText(content: string) {
-  return content.trim().replace(/\s+/g, ' ').slice(0, 140)
+  return stripMarkdown(content).trim().replace(/\s+/g, ' ').slice(0, 140)
+}
+
+function stripMarkdown(content: string) {
+  return content
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s{0,3}>\s?/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    .replace(/(\*\*|__)(.+?)\1/g, '$2')
+    .replace(/(\*|_)(.+?)\1/g, '$2')
+    .replace(/~~(.+?)~~/g, '$1')
 }
 
 export function titleFromPrompt(content: string) {

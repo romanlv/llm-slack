@@ -21,6 +21,7 @@ import {
 
 import { Menu, MenuItem } from '@/components/ui/menu'
 
+import { MessageMarkdown } from '@/features/chat/components/message-markdown'
 import { sendParentChatTurn, sendThreadTurn } from '@/features/chat/send-turn'
 import {
   db,
@@ -141,50 +142,16 @@ function formatTokenCount(tokens?: number) {
   return String(tokens)
 }
 
-function renderInline(text: string) {
-  return text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g).map((part, index) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={`${part}-${index}`}>{part.slice(2, -2)}</strong>
-    }
-
-    if (part.startsWith('*') && part.endsWith('*')) {
-      return <em key={`${part}-${index}`}>{part.slice(1, -1)}</em>
-    }
-
-    return <span key={`${part}-${index}`}>{part}</span>
-  })
-}
-
 function MessageText({ content, streaming }: { content: string; streaming?: boolean }) {
-  const lines = content ? content.split('\n') : streaming ? ['...'] : []
+  if (content) {
+    return <MessageMarkdown content={content} />
+  }
 
-  return (
-    <div className="min-w-0 max-w-full space-y-1.5 overflow-hidden whitespace-pre-wrap break-words text-body [overflow-wrap:anywhere]">
-      {lines.map((line, index) => {
-        if (!line.trim()) {
-          return <div className="h-1" key={`space-${index}`} />
-        }
+  if (streaming) {
+    return <MessageMarkdown content="..." />
+  }
 
-        if (line.startsWith('# ')) {
-          return (
-            <h2 className="text-h1 font-bold tracking-tight" key={`${line}-${index}`}>
-              {renderInline(line.slice(2))}
-            </h2>
-          )
-        }
-
-        if (line.startsWith('## ')) {
-          return (
-            <h3 className="text-title font-bold tracking-tight" key={`${line}-${index}`}>
-              {renderInline(line.slice(3))}
-            </h3>
-          )
-        }
-
-        return <p key={`${line}-${index}`}>{renderInline(line)}</p>
-      })}
-    </div>
-  )
+  return null
 }
 
 function Avatar({
@@ -603,6 +570,7 @@ function ContextMeter({ compact, usage }: { compact?: boolean; usage?: ProviderU
 }
 
 function ConversationComposer({
+  className,
   disabled,
   model,
   onChange,
@@ -613,6 +581,7 @@ function ConversationComposer({
   usage,
   value,
 }: {
+  className?: string
   disabled?: boolean
   model: string
   onChange: (value: string) => void
@@ -638,7 +607,7 @@ function ConversationComposer({
   }, [value])
 
   return (
-    <form className="px-5 pb-3.5 pt-1.5" onSubmit={onSubmit} ref={formRef}>
+    <form className={cn('px-5 pb-3.5 pt-1.5', className)} onSubmit={onSubmit} ref={formRef}>
       <div className="overflow-hidden rounded-md border border-line-strong bg-surface">
         <div className="flex items-start gap-1.5 px-3 pt-2.5 pb-1">
           <span className="mt-px font-mono text-body text-accent">›</span>
@@ -1021,7 +990,7 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
         />
 
         <SmartMessageScrollPane
-          className="min-h-0 overflow-y-auto bg-white py-2"
+          className="row-start-3 min-h-0 overflow-y-auto bg-white py-2"
           contentKey={parentScrollContentKey}
           resetKey={chatId}
         >
@@ -1049,6 +1018,7 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
         </SmartMessageScrollPane>
 
         <ConversationComposer
+          className="row-start-4"
           disabled={
             sendingParent ||
             Boolean(parentChat.archivedAt)
