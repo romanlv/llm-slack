@@ -8,6 +8,8 @@ import {
   completeAttempt,
   failAttempt,
   getActiveTurnForConversation,
+  getActiveTurnForParentChat,
+  interruptActiveTurn,
   listAttemptsForTurn,
   markAttemptDecidedSilent,
   markAttemptStreaming,
@@ -147,6 +149,61 @@ describe('turn lifecycle', () => {
 
     await closeTurn(turn.id, 'complete')
     expect(await getActiveTurnForConversation(chat.id)).toBeUndefined()
+  })
+
+  it('interruptActiveTurn closes the active turn for a parent chat with user-interrupt', async () => {
+    const chat = await seedModelDm()
+    const turn = await openTurn({
+      parentChatId: chat.id,
+      conversationType: 'parent',
+      conversationId: chat.id,
+      userMessageId: 'u',
+    })
+    await openAttempt({
+      turnId: turn.id,
+      assistantMessageId: 'a',
+      model: makeModelRef(),
+    })
+
+    const closed = await interruptActiveTurn(chat.id)
+    expect(closed).toBe(true)
+
+    const refreshed = await db.turns.get(turn.id)
+    expect(refreshed?.status).toBe('closed')
+    expect(refreshed?.stopReason).toBe('user-interrupt')
+  })
+
+  it('interruptActiveTurn returns false when no turn is active for the chat', async () => {
+    const chat = await seedModelDm()
+    expect(await interruptActiveTurn(chat.id)).toBe(false)
+  })
+
+  it('interruptActiveTurn is idempotent — calling twice does not change the stop reason', async () => {
+    const chat = await seedModelDm()
+    const turn = await openTurn({
+      parentChatId: chat.id,
+      conversationType: 'parent',
+      conversationId: chat.id,
+      userMessageId: 'u',
+    })
+    expect(await interruptActiveTurn(chat.id)).toBe(true)
+    // Already closed — getActiveTurnForParentChat returns undefined now.
+    expect(await interruptActiveTurn(chat.id)).toBe(false)
+    const refreshed = await db.turns.get(turn.id)
+    expect(refreshed?.stopReason).toBe('user-interrupt')
+  })
+
+  it('getActiveTurnForParentChat finds turns under a thread sharing the same parent', async () => {
+    const chat = await seedModelDm()
+    const threadTurn = await openTurn({
+      parentChatId: chat.id,
+      conversationType: 'thread',
+      conversationId: 'thread-xyz',
+      userMessageId: 'u',
+    })
+    expect(await getActiveTurnForParentChat(chat.id)).toMatchObject({
+      id: threadTurn.id,
+    })
   })
 
   it('cancelAttempt releases the controller from the in-memory map', async () => {

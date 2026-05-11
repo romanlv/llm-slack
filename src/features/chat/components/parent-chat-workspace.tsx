@@ -26,7 +26,11 @@ import { Menu, MenuItem } from '@/components/ui/menu'
 import { AgentDot } from '@/features/agents/agent-dot'
 import { ChannelSettingsDialog } from '@/features/chat/components/channel-settings-dialog'
 import { MessageMarkdown } from '@/features/chat/components/message-markdown'
-import type { ChannelParticipant } from '@/features/chat/domain'
+import type { ChannelParticipant, Turn } from '@/features/chat/domain'
+import {
+  getActiveTurnForParentChat,
+  interruptActiveTurn,
+} from '@/features/chat/turn-lifecycle'
 import { sendParentChatTurn, sendThreadTurn } from '@/features/chat/send-turn'
 import {
   countStartedBranchesForParentChat,
@@ -1059,6 +1063,37 @@ function ProviderConnectBanner() {
   )
 }
 
+function TurnInProgressBanner({
+  isChannel,
+  onCancel,
+}: {
+  isChannel: boolean
+  onCancel: () => void
+}) {
+  // Mounted only while a turn for this parent chat is `status='active'`.
+  // The Cancel button maps directly to `interruptActiveTurn`, which closes
+  // the turn with `user-interrupt` and aborts the registered stream
+  // controller (DM path). Channel orchestrator bails on the next loop
+  // iteration via the `liveTurn.status === 'closed'` guard.
+  return (
+    <div className="mx-5 mb-1 mt-2 flex items-center gap-2.5 rounded-md border border-accent/30 bg-accent-soft px-3 py-2">
+      <LoaderCircle className="size-4 shrink-0 animate-spin text-accent" />
+      <p className="min-w-0 flex-1 text-small leading-5 text-ink">
+        <span className="font-semibold">
+          {isChannel ? 'Agents are responding…' : 'Streaming a response…'}
+        </span>
+      </p>
+      <button
+        className="inline-flex shrink-0 items-center gap-1 rounded border border-line-strong bg-surface px-2.5 py-1 font-mono text-meta font-bold tracking-wide text-ink transition hover:bg-surface-muted"
+        onClick={onCancel}
+        type="button"
+      >
+        CANCEL
+      </button>
+    </div>
+  )
+}
+
 function EmptyState({ children }: { children: ReactNode }) {
   return (
     <div className="mx-5 my-4 rounded border border-dashed border-line-strong bg-surface-muted px-4 py-5 text-small leading-6 text-ink-muted">
@@ -1145,6 +1180,14 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
         : Promise.resolve([] as ChannelParticipant[]),
     [parentChat?.id, parentChat?.kind],
     [] as ChannelParticipant[],
+  )
+  const activeTurn = useLiveQuery(
+    () =>
+      parentChat
+        ? getActiveTurnForParentChat(parentChat.id)
+        : Promise.resolve(undefined),
+    [parentChat?.id],
+    undefined as Turn | undefined,
   )
   const settings = useLiveQuery(() => getSettings(), [], undefined)
   const parentMessages = useLiveQuery(
@@ -1533,6 +1576,12 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
 
         <div className="row-start-4">
           {hasUsableProvider ? null : <ProviderConnectBanner />}
+          {activeTurn ? (
+            <TurnInProgressBanner
+              isChannel={parentChat.kind === 'channel'}
+              onCancel={() => void interruptActiveTurn(parentChat.id)}
+            />
+          ) : null}
           <ConversationComposer
             availableModels={availableModels}
             connections={providers}
@@ -1650,6 +1699,12 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
 
           <div>
             {hasUsableProvider ? null : <ProviderConnectBanner />}
+            {activeTurn ? (
+              <TurnInProgressBanner
+                isChannel={parentChat.kind === 'channel'}
+                onCancel={() => void interruptActiveTurn(parentChat.id)}
+              />
+            ) : null}
             <ConversationComposer
               availableModels={availableModels}
               connections={providers}

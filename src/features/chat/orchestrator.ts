@@ -97,6 +97,14 @@ export async function runChannelTurn(input: RunChannelTurnInput): Promise<void> 
   let triggeringEvent: ChatMessage = userMessage
 
   for (let step = 0; step < settings.maxChainedSubTurns + 1; step += 1) {
+    // Bail early if the UI (or another caller) closed this turn as
+    // user-interrupt while the previous step was in flight. closeTurn is
+    // idempotent, so a second close here is a no-op; without this guard
+    // the loop would keep launching attempts whose chunks would land on
+    // the cancelled turn until each provider response completes.
+    const liveTurn = await db.turns.get(turn.id)
+    if (!liveTurn || liveTurn.status === 'closed') return
+
     const candidates = selectCandidates({
       participants,
       agentsById,

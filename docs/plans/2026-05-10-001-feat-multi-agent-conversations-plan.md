@@ -14,7 +14,7 @@ Land the data, lifecycle, and UI primitives that let `llm-slack` host both today
 
 ## Execution status (as of 2026-05-10)
 
-Branch: `feat/multi-agent-foundation`. Test suite: 258 passing across 34 files; typecheck clean.
+Branch: `feat/multi-agent-foundation`. Test suite: 264 passing across 34 files; typecheck clean.
 
 | Unit | Status | Commit | Notes |
 |------|--------|--------|-------|
@@ -29,7 +29,7 @@ Branch: `feat/multi-agent-foundation`. Test suite: 258 passing across 34 files; 
 | U2 — Agents library page | ✅ Done | `af5f8a5` | First Phase-2 unit. Adds `AgentDot`, `AgentEditor`, `AgentsPageContent`, `/settings/agents` route, AI-nav entry. |
 | U4 — New-chat modal | ✅ Done | `25ec0c2` | 3-tab modal (Model / Agent / Channel placeholder). Wired into `chat-shell` "New chat" + `home-page` "Start a conversation". |
 | U9 — Channel creation flow | ✅ Done | `efaf6bb` | Adds `createChannel` atomic repo helper (chat + settings + participants in one transaction). Channel tab now shows the name input + agent multi-select + per-agent mode picker (auto-decide / mention-only). |
-| U10 — Channel UI | 🟡 Partial (slice 1) | `684200b` | Ships: per-message agent identity rendering (AgentDot + agent display name in workspace), channel header "Channel settings" button, `ChannelSettingsDialog` with Agents (`ChannelParticipantsPanel`) + Behavior (`ChannelSettingsPanel`) tabs. **Carry-over:** Cancel button on running turns (slice 2). Sidebar DM-internal marker shipped in U13. |
+| U10 — Channel UI | ✅ Done (2 slices) | slice 1 `684200b`, slice 2 _pending commit_ | Slice 1: per-message agent identity, `ChannelSettingsDialog` with Agents + Behavior tabs. Slice 2: Cancel button on running turns via `interruptActiveTurn` + orchestrator loop early-bail; sidebar DM-internal marker shipped in U13. |
 | U13 — Sidebar restructure | ✅ Done | _pending commit_ | Dedicated "Channels" section above Recent. Recent/Starred filter to `kind='dm'`. `DmRowGlyph` renders an AgentDot for agent-DMs and `#` for model-DMs — closes out U10's sidebar-marker carry-over in the same touch. |
 | U12 — Docs update | ⏳ Not started | — | Land after all UI is in. |
 
@@ -39,13 +39,13 @@ These were called out in U7's commit message and are not silent gaps. Each lands
 
 1. **R13a thread response location.** The orchestrator parses `respondIn: 'thread'` from agent responses but persists every reply on the main timeline in v0. The thread-write path pairs naturally with the "orchestrator-inside-thread" step that U11's participant snapshot already sets up.
 2. **Token-budget cap (R14c).** Per-agent and chained-sub-turn caps are wired; the token budget would require aggregating `providerRequestAttempts.usage` at step boundaries.
-3. **Channel user-interrupt UI.** The DM cancel path runs through the new lifecycle (U6); the channel cancel wiring waits for U10's Cancel button.
+3. **Channel user-interrupt UI.** ✅ Resolved in U10 slice 2 — `interruptActiveTurn` plus an orchestrator loop early-bail closes the turn with `user-interrupt` for both DMs and channels.
 
 ### Continuation pointer
 
 Phase 2 is in flight. Next-session entry point:
 
-- **U2, U4, U9, U10 slice 1, and U13 are shipped.** Remaining: **U10 slice 2** (Cancel button on running turns) and **U12** (architecture/schema docs update).
+- **U2, U4, U9, U10 (both slices), and U13 are shipped.** Remaining: **U12** (architecture/schema docs update).
 - All Phase-1 invariants are exercised by `assertDbInvariants` — call it at the end of any new integration test to catch cross-table regressions for free.
 - Design references at `docs/design/2026-05-10-multi-agent-conversations/direction-b-agents.jsx` are the primary UI source for U2/U4/U9/U10. See the [Design References](#design-references) section.
 - `pnpm test` and `pnpm typecheck` are the green-bar gate; the husky pre-commit hook enforces both.
@@ -706,7 +706,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U10. Channel UI: agent identity, participant panel, channel settings, kind badge, cancel 🟡 partial (slice 1 shipped)
+### U10. Channel UI: agent identity, participant panel, channel settings, kind badge, cancel ✅ shipped (2 slices)
 
 **Goal:** All the UI affordances a channel needs to be usable: per-message agent identity, an in-channel participant panel, a channel settings panel, sidebar kind badges, and a Cancel button on running turns.
 

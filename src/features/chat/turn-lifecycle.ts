@@ -7,6 +7,9 @@ import type {
   StopReason,
   Turn,
 } from '@/features/chat/domain'
+import {
+  abortStreamsForConversation,
+} from '@/features/chat/stream-controllers'
 import type { ModelRef } from '@/features/providers/model-ref'
 
 export interface OpenTurnInput {
@@ -169,6 +172,38 @@ export async function getActiveTurnForConversation(
     .reverse()
     .toArray()
   return candidates.find((t) => t.status === 'active')
+}
+
+// Active turn predicate scoped to a parent chat — covers both the parent
+// conversation and any thread under it. Used by the UI to decide whether
+// to show the Cancel button while a channel turn fans out across the
+// parent and an opened thread.
+export async function getActiveTurnForParentChat(
+  parentChatId: string,
+): Promise<Turn | undefined> {
+  const candidates = await db.turns
+    .where('parentChatId')
+    .equals(parentChatId)
+    .toArray()
+  return candidates.find((t) => t.status === 'active')
+}
+
+// Single repo-level entry for "user clicked Cancel on this chat." Closes
+// the most recent active turn with `user-interrupt` (idempotent via
+// closeTurn's status guard) and aborts any in-flight stream registered
+// for the conversation. Safe to call when no turn is active.
+export async function interruptActiveTurn(
+  parentChatId: string,
+): Promise<boolean> {
+  const turn = await getActiveTurnForParentChat(parentChatId)
+  if (!turn) return false
+  // Aborting first lets the DM send-turn's catch path run and observe
+  // `signal.aborted`, then it calls closeTurn itself. The explicit
+  // closeTurn after is the safety net for the channel-orchestrator path,
+  // which doesn't register a controller — closeTurn is idempotent.
+  abortStreamsForConversation(turn.conversationId)
+  await closeTurn(turn.id, 'user-interrupt')
+  return true
 }
 
 export function attemptStatusFor(reason: StopReason): ProviderAttemptStatus | undefined {

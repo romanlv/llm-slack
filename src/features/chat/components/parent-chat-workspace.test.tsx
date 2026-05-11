@@ -450,6 +450,40 @@ describe('ParentChatWorkspace', () => {
     expect(await screen.findByText('~')).toBeInTheDocument()
   })
 
+  it('renders a Cancel button while a turn is active and closes the turn when clicked', async () => {
+    await db.parentChats.add(parentChat())
+    const now = Date.now()
+    await db.turns.add({
+      id: 'turn-active',
+      parentChatId: 'parent-1',
+      conversationType: 'parent',
+      conversationId: 'parent-1',
+      status: 'active',
+      userMessageId: 'm1',
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    render(<ParentChatWorkspace chatId="parent-1" />)
+
+    const cancelBtn = await screen.findByRole('button', { name: /^cancel$/i })
+    expect(cancelBtn).toBeInTheDocument()
+    await userEvent.click(cancelBtn)
+
+    await waitFor(async () => {
+      const refreshed = await db.turns.get('turn-active')
+      expect(refreshed?.status).toBe('closed')
+      expect(refreshed?.stopReason).toBe('user-interrupt')
+    })
+  })
+
+  it('hides the Cancel button when no turn is active', async () => {
+    await db.parentChats.add(parentChat())
+    render(<ParentChatWorkspace chatId="parent-1" />)
+    await screen.findByDisplayValue('Planning')
+    expect(screen.queryByRole('button', { name: /^cancel$/i })).toBeNull()
+  })
+
   it('shows the Channel settings affordance only on channel-kind chats', async () => {
     // First: a DM chat. The button should not render.
     await db.parentChats.add(parentChat())
