@@ -192,6 +192,60 @@ describe('ChatShell chat actions', () => {
     })
   })
 
+  it('renders channels in their own section separate from the DM Recent list', async () => {
+    location.pathname = '/'
+    await db.parentChats.bulkAdd([
+      parentChat({ id: 'dm-1', title: 'model-dm', updatedAt: 3 }),
+      parentChat({
+        id: 'agent-1',
+        kind: 'dm',
+        agentId: 'agent-pm',
+        title: 'PM Lens',
+        updatedAt: 2,
+        model: null,
+      }),
+      parentChat({
+        id: 'channel-1',
+        kind: 'channel',
+        title: 'launch-plan',
+        updatedAt: 1,
+        model: null,
+      }),
+    ])
+
+    render(<ChatShell />)
+
+    // Channels section header is visible.
+    const channelsHeading = await screen.findByText(/^channels$/i, {
+      selector: 'span',
+    })
+    expect(channelsHeading).toBeInTheDocument()
+    // Channel chat appears.
+    expect(
+      await screen.findByRole('link', { name: /launch-plan/i }),
+    ).toBeInTheDocument()
+    // DM chats appear separately under Recent (still present).
+    expect(
+      await screen.findByRole('link', { name: /model-dm/i }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByRole('link', { name: /pm lens/i }),
+    ).toBeInTheDocument()
+    // No channel bleeds into the Recent count — find the "No other chats"
+    // line should NOT be present, but "model-dm" and "PM Lens" are.
+    expect(screen.queryByText(/no other chats/i)).toBeNull()
+  })
+
+  it('hides the Channels section when no channel chats exist', async () => {
+    location.pathname = '/'
+    await db.parentChats.add(parentChat({ id: 'parent-1', title: 'Planning' }))
+
+    render(<ChatShell />)
+
+    await screen.findByRole('link', { name: /planning/i })
+    expect(screen.queryByText(/^channels$/i)).toBeNull()
+  })
+
   it('does not navigate away when deleting a non-active chat', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     location.pathname = '/chat/parent-1'

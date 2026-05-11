@@ -22,6 +22,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Menu, MenuItem } from '@/components/ui/menu'
+import { AgentDot } from '@/features/agents/agent-dot'
 import {
   archiveParentChat,
   countStartedBranchesByParentChat,
@@ -59,6 +60,21 @@ function parseChatPath(pathname: string) {
     activeChatId: match?.[1],
     activeThreadId: match?.[2],
   }
+}
+
+function DmRowGlyph({ parentChat }: { parentChat: ParentChat }) {
+  // Agent-DMs get a small AgentDot (chat.title === agent.displayName at
+  // creation; agentId seeds the palette). Model-DMs keep today's "#" mark.
+  if (parentChat.kind === 'dm' && parentChat.agentId) {
+    return (
+      <AgentDot
+        agentId={parentChat.agentId}
+        displayName={parentChat.title}
+        size="sm"
+      />
+    )
+  }
+  return <Hash aria-hidden="true" className="size-3.5 shrink-0 text-sidebar-fg-dim" />
 }
 
 function branchTitle(rootMessage?: ChatMessage) {
@@ -315,13 +331,24 @@ export function ChatShell() {
   )
   const activeParentChats = visibleParentChats.filter((chat) => !chat.archivedAt)
   const archivedParentChats = visibleParentChats.filter((chat) => Boolean(chat.archivedAt))
-  const starredParentChats = activeParentChats
+  // DM-equivalent listings (Starred, Recent) filter to kind='dm' so
+  // channels stay in their own section. Star remains a per-chat affordance
+  // regardless of kind, so starred channels surface under Channels as
+  // pinned rows rather than in the DM Starred group.
+  const dmParentChats = activeParentChats.filter((chat) => chat.kind === 'dm')
+  const channelParentChats = activeParentChats.filter(
+    (chat) => chat.kind === 'channel',
+  )
+  const starredParentChats = dmParentChats
     .filter((chat) => Boolean(chat.starredAt))
     .sort((a, b) => (b.starredAt ?? 0) - (a.starredAt ?? 0))
-  const recentParentChats = activeParentChats.filter((chat) => !chat.starredAt)
+  const recentParentChats = dmParentChats.filter((chat) => !chat.starredAt)
   const RECENT_LIMIT = 8
   const visibleRecentParentChats = recentParentChats.slice(0, RECENT_LIMIT)
   const hasMoreRecent = recentParentChats.length > RECENT_LIMIT
+  const visibleChannelParentChats = [...channelParentChats].sort(
+    (a, b) => b.updatedAt - a.updatedAt,
+  )
   const activeParentChat = activeChatId
     ? parentChats.find((chat) => chat.id === activeChatId)
     : undefined
@@ -444,6 +471,7 @@ export function ChatShell() {
                       params={{ chatId: parentChat.id }}
                       to="/chat/$chatId"
                     >
+                      <DmRowGlyph parentChat={parentChat} />
                       <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
                       {branchCount > 0 ? (
                         <span className="rounded bg-white/10 px-1.5 font-mono text-meta font-semibold text-sidebar-chip">
@@ -483,6 +511,49 @@ export function ChatShell() {
             </section>
           ) : null}
 
+          {visibleChannelParentChats.length > 0 ? (
+            <section className="mt-5">
+              <div className="mb-1 flex items-center justify-between px-4 font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
+                <span className="inline-flex items-center gap-1.5">
+                  <Hash aria-hidden="true" className="size-3 shrink-0" />
+                  Channels
+                </span>
+                <span className="font-mono text-meta text-sidebar-fg-dim">
+                  {visibleChannelParentChats.length}
+                </span>
+              </div>
+              {visibleChannelParentChats.map((parentChat) => {
+                const active =
+                  location.pathname === `/chat/${parentChat.id}` ||
+                  location.pathname.startsWith(`/chat/${parentChat.id}/thread/`)
+                return (
+                  <div
+                    className={cn(
+                      'group mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-body transition',
+                      active
+                        ? 'bg-sidebar-active font-semibold text-sidebar-active-fg'
+                        : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
+                    )}
+                    key={parentChat.id}
+                  >
+                    <Link
+                      className="flex min-w-0 flex-1 items-center gap-1.5 truncate"
+                      params={{ chatId: parentChat.id }}
+                      to="/chat/$chatId"
+                    >
+                      <Hash className="size-3.5 shrink-0 text-sidebar-fg-dim" />
+                      <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
+                    </Link>
+                    <ChatActionsMenu
+                      onDelete={() => void handleDeleteParentChat(parentChat)}
+                      parentChat={parentChat}
+                    />
+                  </div>
+                )
+              })}
+            </section>
+          ) : null}
+
           <section className="mt-5">
             <div className="mb-1 flex items-center justify-between px-4 font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
               <span>Recent</span>
@@ -516,7 +587,7 @@ export function ChatShell() {
                       params={{ chatId: parentChat.id }}
                       to="/chat/$chatId"
                     >
-                      <Hash className="size-3.5 shrink-0 text-sidebar-fg-dim" />
+                      <DmRowGlyph parentChat={parentChat} />
                       <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
                       {branchCount > 0 ? (
                         <span className="rounded bg-white/10 px-1.5 font-mono text-meta font-semibold text-sidebar-chip">
