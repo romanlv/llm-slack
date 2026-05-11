@@ -12,6 +12,44 @@ origin: docs/brainstorms/multi-agent-conversations-requirements.md
 
 Land the data, lifecycle, and UI primitives that let `llm-slack` host both today's model-DM and two new shapes (agent-DM and multi-agent channel) on one extended `parentChats` row. The work ships in five phases: agent-DM first (smallest end-to-end value), then channel infrastructure (schema + per-attempt send lifecycle), then orchestrator + mention parsing, then channel UI, then thread inheritance and doc updates.
 
+## Execution status (as of 2026-05-10)
+
+Branch: `feat/multi-agent-foundation`. Test suite: 215 passing across 29 files; typecheck clean.
+
+| Unit | Status | Commit | Notes |
+|------|--------|--------|-------|
+| U14 — Test infra helpers | ✅ Done | `3ed4b00` | All five helpers landed. Agent/channel scenario builders ship progressively at U1/U5 (their schemas didn't exist yet at U14). |
+| U1 — Schema v6 + agents | ✅ Done | `493c0d9` | Plan said "v2"; actual is **v6** (DB was already at v5). Schema progression is now v6→v9 across U1/U5/U6/U11. |
+| U8 — Mention parser | ✅ Done | `d078f28` | — |
+| U3 — Agent-DM send-turn | ✅ Done | `d2e3fb8` | AE7 byte-parity verified by an explicit transport-snapshot test. |
+| U5 — Schema v7 + channel persistence | ✅ Done | `c5ad456` | Plan "v3" → actual **v7**. |
+| U6 — Schema v8 + turn lifecycle | ✅ Done | `d9bc4fb` | Plan "v4" → actual **v8**. `provider-contract.signal` was already in place from commit `c89ba94`; only the lifecycle layer was added. |
+| U7 — Orchestrator | ✅ Done with three deferrals (see below) | `6de596e` | Core fan-out, decide-to-respond, caps, stop reasons all land. |
+| U11 — Schema v9 + thread participant snapshot | ✅ Done | `20390e1` | Plan "v5" → actual **v9**. Schema bump is logical only (`chatParticipants.chatId` already accepted any id). |
+| U2 — Agents library page | ⏳ Not started | — | First Phase-2 unit. |
+| U4 — New-chat modal | ⏳ Not started | — | — |
+| U9 — Channel creation flow | ⏳ Not started | — | — |
+| U10 — Channel UI | ⏳ Not started | — | — |
+| U13 — Sidebar restructure | ⏳ Not started | — | — |
+| U12 — Docs update | ⏳ Not started | — | Land after all UI is in. |
+
+### Deferrals inside completed Phase 1
+
+These were called out in U7's commit message and are not silent gaps. Each lands naturally as a small follow-up rather than blocking Phase 2.
+
+1. **R13a thread response location.** The orchestrator parses `respondIn: 'thread'` from agent responses but persists every reply on the main timeline in v0. The thread-write path pairs naturally with the "orchestrator-inside-thread" step that U11's participant snapshot already sets up.
+2. **Token-budget cap (R14c).** Per-agent and chained-sub-turn caps are wired; the token budget would require aggregating `providerRequestAttempts.usage` at step boundaries.
+3. **Channel user-interrupt UI.** The DM cancel path runs through the new lifecycle (U6); the channel cancel wiring waits for U10's Cancel button.
+
+### Continuation pointer
+
+Phase 2 is unblocked. Next-session entry point:
+
+- Start with **U2** (Agents library page, see [§Implementation Units](#implementation-units)).
+- All Phase-1 invariants are exercised by `assertDbInvariants` — call it at the end of any new integration test to catch cross-table regressions for free.
+- Design references at `docs/design/2026-05-10-multi-agent-conversations/direction-b-agents.jsx` are the primary UI source for U2/U4/U9/U10. See the [Design References](#design-references) section.
+- `pnpm test` and `pnpm typecheck` are the green-bar gate; the husky pre-commit hook enforces both.
+
 ---
 
 ## Problem Frame
@@ -19,6 +57,8 @@ Land the data, lifecycle, and UI primitives that let `llm-slack` host both today
 Today's chat is single-assistant; the data model and turn lifecycle assume one author per turn. Origin doc establishes the product: keep model-DM intact, add agent-DM and channel shapes, agents decide whether to respond (Slack channel of humans), all bounded by per-channel settings. The implementation challenge is to do this *additively* on top of `parentChats`, `messages`, `send-turn.ts` without forking the DM path or breaking AE7 ("DM identical to today").
 
 See origin: `docs/brainstorms/multi-agent-conversations-requirements.md`.
+
+UI direction has been explored as static React mockups at `docs/design/2026-05-10-multi-agent-conversations/`. Phase 2 (UI units U2, U4, U9, U10, U13) implements those mockups; see [Design References](#design-references) below for per-unit mapping and divergence notes.
 
 ---
 
@@ -206,7 +246,7 @@ Each version ships with a migration test from the prior version's fixture.
 
 ---
 
-### U14. Test infrastructure helpers
+### U14. Test infrastructure helpers ✅ shipped (`3ed4b00`)
 
 **Goal:** Land the test helpers every subsequent backend unit relies on, before any production code that uses them exists. This unit creates the helpers; later units consume them.
 
@@ -258,7 +298,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U1. Schema v2: kind discriminator + agents table
+### U1. Schema v2: kind discriminator + agents table ✅ shipped as **v6** (`493c0d9`)
 
 **Goal:** Land the smallest possible schema change that introduces the chat kind concept and the agents library, without touching any UI or send flow yet.
 
@@ -296,7 +336,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U2. Agents library settings page
+### U2. Agents library settings page ⏳ not started
 
 **Goal:** Give the user a UI to define and manage agents.
 
@@ -318,6 +358,15 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 - System prompt: free-text `<textarea>`. No structured fields. No prompt templates.
 - Empty state: copy that points at "create your first agent" plus a brief one-liner explaining that agents are reusable across chats.
 
+**Design reference:** `docs/design/2026-05-10-multi-agent-conversations/direction-b-agents.jsx`
+- Agent **editor / create flow**: `CreateAgentModal` (≈ line 1438). Borrow field order (name, model, system prompt) and the persona-row visual treatment.
+- Agent **row shape** (for the workspace-level list): `SettingsAgentsTab` rows (≈ line 1001) — name + handle + model chip + per-row edit/remove. Strip the channel-scoped columns ("Speaks when", "7d msgs · spend", "in N channels", "memory notes") — those belong to channel participants (U10) or are deferred features (memory, cost metering).
+- Avatar/glyph treatment: `AgentDot` (≈ line 433) — stable hash → palette index, glyph fallback. Matches U10's "stable colored marker."
+
+**Divergences from design:**
+- The design's mock surfaces `tools`, `memory`, `msgs7d`, `spend7d` per agent. All four are deferred (per Scope Boundaries). The v0 agent definition is just `displayName + model + systemPrompt`.
+- The design's `SettingsAgentsTab` is *channel-scoped*; this unit's surface is the *workspace-level* agent library at `/settings/agents`. Same row visual treatment, different scope and CRUD target.
+
 **Patterns to follow:**
 - `src/features/settings/openrouter-settings-page-content.tsx` for an existing settings sub-page with editable rows and validation.
 - `src/features/chat/components/parent-chat-workspace.tsx` `MessageEditor` for inline-edit pattern (or use a modal — pick what fits the page best).
@@ -334,7 +383,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U3. Agent-DM send-turn integration
+### U3. Agent-DM send-turn integration ✅ shipped (`d2e3fb8`)
 
 **Goal:** A user can chat 1:1 with an agent (agent-DM). Today's send-turn flow is reused; the only change is that the agent's system prompt is prepended.
 
@@ -371,7 +420,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U4. New-chat picker (Model + Agent tabs)
+### U4. New-chat picker (Model + Agent tabs) ⏳ not started
 
 **Goal:** Replace the current direct-to-chat "New" button with a chooser modal. Channel tab is rendered but disabled in this unit; enabled at U9.
 
@@ -391,6 +440,13 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 - Channel tab: placeholder "Coming soon" message in this unit; wired up in U9.
 - Keyboard: cmd/ctrl+enter to confirm; Esc to dismiss; tabs reachable by keyboard.
 
+**Design reference:** `docs/design/2026-05-10-multi-agent-conversations/direction-b-agents.jsx`
+- Channel tab (placeholder here, full in U9) follows `CreateChannelModal` (≈ line 1761) — single-field "Name" modal with `#` glyph + helper copy, Next button.
+- Modal chrome (header, close button, footer bar with primary action) is consistent across `CreateChannelModal` and `CreateAgentModal`. Reuse the same primitive for all three tabs of the new-chat modal.
+
+**Divergences from design:**
+- The design has no explicit three-tab "New chat" modal — it shows separate `CreateChannel` and `CreateAgent` flows. This plan unifies them into one entry point with three tabs (Model / Agent / Channel) per the resolved open question in Key Technical Decisions. Borrow visual primitives, not the surface composition.
+
 **Patterns to follow:**
 - `src/components/ui/menu.tsx` and any existing modal/dialog primitive in the codebase. If none exist, reuse the inline-popover pattern from `parent-chat-workspace.tsx`'s message-actions menu.
 
@@ -406,7 +462,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U5. Schema v3: chatParticipants, channelSettings, messages.agentId
+### U5. Schema v3: chatParticipants, channelSettings, messages.agentId ✅ shipped as **v7** (`c5ad456`)
 
 **Goal:** Land the channel-shaped persistence layer. No orchestration yet — just storage and queries.
 
@@ -451,7 +507,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U6. Schema v4: turns + providerRequestAttempts; refactor send-turn into proper lifecycle
+### U6. Schema v4: turns + providerRequestAttempts; refactor send-turn into proper lifecycle ✅ shipped as **v8** (`d9bc4fb`)
 
 **Goal:** Promote `turns` and `providerRequestAttempts` from drafted in `docs/db-schema.md` to live tables, and refactor `send-turn.ts` to use them with `AbortController` + per-call `requestAttemptId` ownership checks. DM behavior is preserved bit-for-bit; the orchestrator at U7 builds on this lifecycle.
 
@@ -502,7 +558,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U7. Orchestrator: bounded fan-out, decide-to-respond, safety caps, stop reasons
+### U7. Orchestrator: bounded fan-out, decide-to-respond, safety caps, stop reasons ✅ shipped (`6de596e`) — three small deferrals carry over (see Execution status)
 
 **Goal:** The orchestrator that drives channel turns. Implements F1, F2, F4 from the origin doc.
 
@@ -571,7 +627,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U8. Mention parser
+### U8. Mention parser ✅ shipped (`d078f28`)
 
 **Goal:** Parse `@<display-name>` mentions out of message bodies so the orchestrator can identify mention-only agent firings.
 
@@ -610,7 +666,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U9. New-chat picker: enable Channel tab + channel creation flow
+### U9. New-chat picker: enable Channel tab + channel creation flow ⏳ not started
 
 **Goal:** Wire the Channel tab in U4's modal to a real channel-creation flow.
 
@@ -628,6 +684,13 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 - "Create channel" creates the chat, participants, and settings in one Dexie transaction; navigates to `/chat/$chatId` with the channel UI from U10 already rendering.
 - The picker reuses U2's agents library; if no agents exist, the tab shows the same empty state pointing at `/settings/agents`.
 
+**Design reference:** `docs/design/2026-05-10-multi-agent-conversations/direction-b-agents.jsx`
+- `CreateChannelModal` (≈ line 1761) for the name-only first step.
+- `SettingsAgentsTab` (≈ line 1001) for the "add agents" follow-on UI — specifically the "+ ADD FROM WORKSPACE" / "+ NEW PERSONA" pair of CTAs and the agent-row visual.
+
+**Divergences from design:**
+- The design uses a two-step flow (create channel by name → land in channel settings → add agents there). The plan creates participants in the same modal in one transaction. Pick the design's two-step flow if it simplifies the UI: name-only modal → navigate to new channel → channel settings opens automatically with the Agents tab focused. This shortens U9's surface and matches the mocks more faithfully. The Dexie-transactional create still applies; only the visual flow differs.
+
 **Patterns to follow:**
 - `src/features/chat/repository.ts` `findOrCreateEmptyParentChat` for the chat-creation pattern.
 - `db.transaction('rw', [...], async () => {...})` for the multi-row write.
@@ -643,7 +706,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U10. Channel UI: agent identity, participant panel, channel settings, kind badge, cancel
+### U10. Channel UI: agent identity, participant panel, channel settings, kind badge, cancel ⏳ not started
 
 **Goal:** All the UI affordances a channel needs to be usable: per-message agent identity, an in-channel participant panel, a channel settings panel, sidebar kind badges, and a Cancel button on running turns.
 
@@ -670,6 +733,26 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 - Sidebar marker (DM-internal): small inline glyph distinguishing model-DM (today's "~") from agent-DM (agent's colored marker, scaled down) within the same DM-equivalent rows. Channels are surfaced via a dedicated section added in U13, not via a kind badge in mixed lists.
 - Decide-status hint: optional, lightweight ephemeral indicator for "agent X is deciding" — start without it, add only if the UX feels worse without (deferred to post-implementation polish).
 
+**Design reference:** `docs/design/2026-05-10-multi-agent-conversations/direction-b-agents.jsx`
+- Channel workspace shell + composer + message stream: `MultiAgentChannel` (≈ line 881) and its inner pieces.
+- Per-message agent identity (`Avatar` + `authorLabel` extension): `AgMessage` (≈ line 537) — author row with colored `AgentDot`, display name, model chip, `@handle`. Snapshot fields on `messages` drive this; live agent record is fallback.
+- Channel header (title, participant count, settings affordance): `ChannelHeader` (≈ line 451).
+- Participants surface: design exposes two complementary surfaces — `AgentsRail` (≈ line 786) is a right-side rail showing all participants with avatars; `SettingsAgentsTab` (≈ line 1001) is the canonical add/remove/configure surface inside the settings modal. **Pick `SettingsAgentsTab`-in-modal as the primary participants panel for U10 and skip the right rail in v0** — it duplicates information already on the message rows and adds a third column that complicates the layout.
+- Channel settings: `ChannelSettingsModal` (≈ line 910) with left-rail tabs. v0 implements only the tabs that correspond to in-scope settings:
+  - **About** (`SettingsAboutTab`, ≈ line 1169): channel name + description. In scope.
+  - **Agents** (`SettingsAgentsTab`, ≈ line 1001): add/remove participants, per-agent mode. In scope.
+  - **Behavior** (`SettingsBehaviorTab`, ≈ line 1193): caps (`maxChainedSubTurns`, `maxMessagesPerAgentPerInput`, `tokenBudgetPerInput`), `defaultParticipationMode`, `allowAgentThreading`. In scope; map fields verbatim where possible.
+  - **Manage** (`SettingsDangerTab`, ≈ line 1292): archive/delete. Already exists in repo for parent chats; reuse.
+  - **People** / **Context & memory**: **omit** in v0 (no human collaborators, no agent memory).
+- Per-agent participation mode chip: `SpeaksWhenChip` (≈ line 1150).
+
+**Divergences from design:**
+- The design's `SpeaksWhenChip` exposes three modes — `mention | proactive | every`. The plan ships only **two**: `mention-only` (= design `mention`) and `auto-decide` (= design `proactive`). The `every` ("always responds") mode is explicitly outside this product's identity (origin Scope Boundaries: a blunt always-respond mode contradicts the human-Slack model). Drop "every" from the chip's enum.
+- The design surfaces `tools`, `memory notes`, `in N channels`, `7d msgs · spend` on each agent row. None of those data points exist in v0. The Agents tab inside channel settings should render only: agent dot + display name + `@handle` + model chip + speaks-when chip + edit/remove. The columns are dropped from the grid template.
+- Design shows a "Suggested for this channel" affordance under the agents tab. Out of scope — drop.
+- Design's `AgentsRail` is a right-side panel that lists all participants in-room. Keep `MultiAgentChannel`'s shell minus the rail (`railOpen={false}` is the v0 default). The header agent stack inside `ChannelHeader` is sufficient at-a-glance affordance.
+- Design uses an aubergine Slack-style palette (`#3F0E40` sidebar, etc.). The repo currently themes via tokens (see commit `fe32b3f` "Replace hardcoded bg-white with theme tokens"). Treat the design palette as direction, not pixel-spec: map colors to existing tokens; if no token exists, add one. Do not introduce hex literals into components.
+
 **Patterns to follow:**
 - `src/features/settings/openrouter-settings-page-content.tsx` for the settings-panel editable-rows pattern.
 - `src/features/chat/components/parent-chat-workspace.tsx` `Avatar` and `authorLabel` (lines ~181 / ~447) — extension points for agent identity.
@@ -688,7 +771,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U13. Sidebar restructure: dedicated Channels section
+### U13. Sidebar restructure: dedicated Channels section ⏳ not started
 
 **Goal:** Channels live in their own sidebar section (Slack convention), not mixed into the flat parent-chat list. DMs (model and agent) continue to surface through today's listings (Saved, Starred, Recent, Archived); channels surface separately.
 
@@ -710,6 +793,15 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 - Archived: archived channels appear under the same Archived footer toggle, alongside archived DMs. No separate archived-channels section (kind is visible by section context once the user opens Archived).
 - Sidebar marker for DM-internal model-vs-agent distinction (introduced in U10) stays — channels don't need it because the section header carries that meaning.
 
+**Design reference:** `docs/design/2026-05-10-multi-agent-conversations/direction-b-agents.jsx`
+- Sidebar shell + grouping: `AgSidebar` (≈ line 177). Specifically the **CHANNELS** group with `#` glyph, unread badge, agent count per row; and the mixed DMs list with people and agent rows side by side.
+- `SidebarGroup` (≈ line 417) is the section primitive — title + optional action affordance (e.g., `+` for new channel).
+
+**Divergences from design:**
+- The design's DMs list mixes humans and agents. This product has no human collaborators in v0 — the DMs section in this app is purely model-DMs and agent-DMs. Keep the mixed-row visual treatment (model-DM marker vs agent-DM colored dot) but omit the people rows.
+- The design shows expandable agent-DM rows with per-agent chat history (e.g., "Strategy Lead" expands to four prior chats). That richer affordance is **deferred** — v0 lists each agent-DM as a separate row in the DM-equivalent listings (matching today's parent-chat row behavior). Tracked as follow-up.
+- The design's sidebar palette is aubergine. Same theme-token note as U10 applies — colors come from tokens, not literals.
+
 **Patterns to follow:**
 - `src/app/app-shell.tsx` existing sidebar section structure (Saved-for-later block, Starred section, Recent section, Archived footer) — add Channels following the same structural pattern.
 - `src/features/chat/repository.ts` existing `listRecentParentChats` / starred/saved query helpers — extend with `kind` filter rather than forking new functions.
@@ -727,7 +819,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U11. Thread inheritance for channels: snapshot participants at creation
+### U11. Thread inheritance for channels: snapshot participants at creation ✅ shipped as **v9** (`20390e1`)
 
 **Goal:** Threads created from a channel message inherit the channel's kind, participants, and modes at creation time; they do not look up live (R17).
 
@@ -765,7 +857,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U12. Update architecture.md and db-schema.md
+### U12. Update architecture.md and db-schema.md ⏳ not started
 
 **Goal:** Architecture and schema docs reflect the new shape. `AGENTS.md` constraint: "When a feature intentionally violates this guide, update the guide in the same change with the reason."
 
@@ -834,9 +926,43 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
+## Design References
+
+Static React mockups live at `docs/design/2026-05-10-multi-agent-conversations/`. They are illustrative — the implementation maps them onto the existing component primitives and theme tokens rather than reproducing literal markup or palette.
+
+### File map
+
+| File | Use during |
+|------|------------|
+| `direction-b-v2.jsx` | Reference for the overall app shell (sidebar + main + side panel layout). Already largely in place in `src/app/app-shell.tsx` — consult for sidebar grouping conventions. |
+| `direction-b-agents.jsx` | **Primary reference for U2, U4, U9, U10, U13.** Contains `MultiAgentChannel`, `AgSidebar`, `AgMessage`, `ChannelHeader`, `ChannelSettingsModal` and tabs, `CreateAgentModal`, `CreateChannelModal`. |
+| `direction-b-settings.jsx` | Reference for settings-page chrome (already shipped for providers). Borrow the editable-row shape for the agents library (U2). |
+| `direction-a-paper.jsx`, `direction-c-midnight.jsx` | Alternate aesthetic directions (light editorial; dark serif). Not the primary direction; consult only if a token mapping needs an alternate palette. |
+| `design-canvas.jsx`, `shared-data.jsx`, `LLM Slack*.html` | Harness only — pan/zoom canvas wrapper and shared fixture data. Not implementation-relevant. |
+
+### Cross-cutting divergences (apply to all UI units)
+
+- **Participation modes:** plan ships `auto-decide` + `mention-only`. Design's third mode `every` is out of identity (origin Scope) — drop.
+- **Out-of-scope agent surfaces:** `tools`, `memory`, `in N channels`, `msgs7d`, `spend7d` exist only in the design's data shape. They are **inspirational, not implementation targets** for v0. Agent definition is `displayName + model + systemPrompt`; everything else is deferred.
+- **Theme tokens, not literals:** the design uses an aubergine Slack-style palette (`#3F0E40` sidebar, `#611F69` accent, `#007A5A` send). Map these onto existing theme tokens (see commit `fe32b3f`). Don't introduce hex literals into components.
+- **No human collaborators:** the design's sidebar mixes people-DMs with agent-DMs. v0 has no human side; render only model-DM and agent-DM rows.
+
+### Per-unit mapping (summary)
+
+| Unit | Primary components in `direction-b-agents.jsx` |
+|------|-----------------------------------------------|
+| U2 — Agents library page | `CreateAgentModal`, `AgentDot`, `SettingsAgentsTab` (row shape only) |
+| U4 — New-chat modal | `CreateChannelModal` (chrome) — Channel tab is placeholder |
+| U9 — Channel creation flow | `CreateChannelModal` (name step) → land in channel settings → `SettingsAgentsTab` (add agents) |
+| U10 — Channel UI | `MultiAgentChannel` (shell), `ChannelHeader`, `AgMessage`, `AgentDot`, `ChannelSettingsModal` with tabs About / Agents / Behavior / Manage only, `SpeaksWhenChip` |
+| U13 — Sidebar restructure | `AgSidebar`, `SidebarGroup` — CHANNELS group + DMs section |
+
+---
+
 ## Sources & References
 
 - **Origin document:** `docs/brainstorms/multi-agent-conversations-requirements.md`
+- **Design mockups:** `docs/design/2026-05-10-multi-agent-conversations/` (primary file: `direction-b-agents.jsx`)
 - Architecture guardrail: `docs/architecture.md`
 - Schema reference: `docs/db-schema.md`
 - Provider refactor (`ModelRef`, `resolveForSend`): `docs/providers-refactor.md`
