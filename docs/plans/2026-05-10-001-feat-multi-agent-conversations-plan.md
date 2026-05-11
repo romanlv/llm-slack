@@ -14,7 +14,7 @@ Land the data, lifecycle, and UI primitives that let `llm-slack` host both today
 
 ## Execution status (as of 2026-05-10)
 
-Branch: `feat/multi-agent-foundation`. Test suite: 215 passing across 29 files; typecheck clean.
+Branch: `feat/multi-agent-foundation`. Test suite: 227 passing across 31 files; typecheck clean.
 
 | Unit | Status | Commit | Notes |
 |------|--------|--------|-------|
@@ -26,7 +26,7 @@ Branch: `feat/multi-agent-foundation`. Test suite: 215 passing across 29 files; 
 | U6 — Schema v8 + turn lifecycle | ✅ Done | `d9bc4fb` | Plan "v4" → actual **v8**. `provider-contract.signal` was already in place from commit `c89ba94`; only the lifecycle layer was added. |
 | U7 — Orchestrator | ✅ Done with three deferrals (see below) | `6de596e` | Core fan-out, decide-to-respond, caps, stop reasons all land. |
 | U11 — Schema v9 + thread participant snapshot | ✅ Done | `20390e1` | Plan "v5" → actual **v9**. Schema bump is logical only (`chatParticipants.chatId` already accepted any id). |
-| U2 — Agents library page | ⏳ Not started | — | First Phase-2 unit. |
+| U2 — Agents library page | ✅ Done | _pending commit_ | First Phase-2 unit. Adds `AgentDot`, `AgentEditor`, `AgentsPageContent`, `/settings/agents` route, AI-nav entry. |
 | U4 — New-chat modal | ⏳ Not started | — | — |
 | U9 — Channel creation flow | ⏳ Not started | — | — |
 | U10 — Channel UI | ⏳ Not started | — | — |
@@ -43,9 +43,9 @@ These were called out in U7's commit message and are not silent gaps. Each lands
 
 ### Continuation pointer
 
-Phase 2 is unblocked. Next-session entry point:
+Phase 2 is in flight. Next-session entry point:
 
-- Start with **U2** (Agents library page, see [§Implementation Units](#implementation-units)).
+- **U2 is shipped.** Continue with **U4** (New-chat picker — Model + Agent tabs; see [§Implementation Units](#implementation-units)).
 - All Phase-1 invariants are exercised by `assertDbInvariants` — call it at the end of any new integration test to catch cross-table regressions for free.
 - Design references at `docs/design/2026-05-10-multi-agent-conversations/direction-b-agents.jsx` are the primary UI source for U2/U4/U9/U10. See the [Design References](#design-references) section.
 - `pnpm test` and `pnpm typecheck` are the green-bar gate; the husky pre-commit hook enforces both.
@@ -336,7 +336,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U2. Agents library settings page ⏳ not started
+### U2. Agents library settings page ✅ shipped
 
 **Goal:** Give the user a UI to define and manage agents.
 

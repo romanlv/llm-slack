@@ -11,6 +11,7 @@ import { ModelsPage } from '@/pages/models-page'
 import { PreferencesPage } from '@/pages/preferences-page'
 import { ProfilePage } from '@/pages/profile-page'
 import { SavedMessagesPage } from '@/pages/saved-messages-page'
+import { SettingsAgentsPage } from '@/pages/settings-agents-page'
 import { SettingsPage } from '@/pages/settings-page'
 
 // AppShell is the root layer. ChatShell and SettingsShell are pathless
@@ -82,6 +83,12 @@ const settingsModelsRoute = createRoute({
   component: ModelsPage,
 })
 
+const settingsAgentsRoute = createRoute({
+  getParentRoute: () => settingsLayoutRoute,
+  path: '/settings/agents',
+  component: SettingsAgentsPage,
+})
+
 const settingsProfileRoute = createRoute({
   getParentRoute: () => settingsLayoutRoute,
   path: '/settings/profile',
@@ -115,6 +122,7 @@ const routeTree = rootRoute.addChildren([
     settingsIndexRoute,
     settingsProvidersRoute,
     settingsModelsRoute,
+    settingsAgentsRoute,
     settingsProfileRoute,
     settingsPreferencesRoute,
   ]),

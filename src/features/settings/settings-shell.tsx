@@ -32,6 +32,11 @@ const NAV_GROUPS: NavGroup[] = [
         to: '/settings/providers',
         matchPrefix: '/settings/providers',
       },
+      {
+        label: 'Agents',
+        to: '/settings/agents',
+        matchPrefix: '/settings/agents',
+      },
     ],
   },
 ]
