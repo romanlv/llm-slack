@@ -1,3 +1,5 @@
+import { getAgent } from '@/features/agents/agents-repository'
+import type { Agent, AgentMessageSnapshot } from '@/features/chat/domain'
 import {
   appendUserMessage,
   completeMessage,
@@ -45,6 +47,47 @@ function estimateContextSize(messages: Array<{ content: string }>) {
   return messages.reduce((total, message) => total + message.content.length, 0)
 }
 
+// When a chat is agent-bound, resolve the agent and substitute its model
+// for the chat's. Returns null for model-DMs (today's behavior).
+async function resolveAgentBinding(agentId: string | null | undefined): Promise<Agent | null> {
+  if (!agentId) return null
+  const agent = await getAgent(agentId)
+  if (!agent) {
+    // Orphaned agent-DM (definition was deleted). Refuse to send rather
+    // than silently swapping to the chat's stale model — the chat row's
+    // archived-style guard pattern is the closest analog.
+    throw new Error(
+      'This agent-DM is orphaned (the agent was deleted). Start a fresh agent-DM to continue.',
+    )
+  }
+  return agent
+}
+
+function snapshotForAgent(agent: Agent, resolvedSnapshot: ModelRef): AgentMessageSnapshot {
+  return {
+    displayName: agent.displayName,
+    model: resolvedSnapshot,
+  }
+}
+
+// Prepend the agent's system prompt as a {role:'system'} message. Empty or
+// whitespace-only prompts pass through unchanged so transport stays
+// byte-identical to a model-DM (AE7 invariant). Idempotent against a prior
+// identical system prefix.
+function withAgentSystemPrompt<M extends { role: string; content: string }>(
+  agent: Agent | null,
+  messages: M[],
+): Array<{ role: 'system'; content: string } | M> {
+  if (!agent) return messages
+  const prompt = agent.systemPrompt.trim()
+  if (!prompt) return messages
+  const first = messages[0]
+  if (first && first.role === 'system' && first.content === agent.systemPrompt) {
+    return messages
+  }
+  return [{ role: 'system' as const, content: agent.systemPrompt }, ...messages]
+}
+
 async function resolveSendTarget(modelRef: ModelRef | null): Promise<ResolveForSendResult> {
   const settings = await getSettings()
   const resolved = await resolveForSend(modelRef, { settingsDefault: settings.defaultModel })
@@ -74,7 +117,8 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
     throw new Error('Archived conversations cannot accept new sends.')
   }
 
-  const resolved = await resolveSendTarget(parentChat.model ?? null)
+  const agent = await resolveAgentBinding(parentChat.agentId)
+  const resolved = await resolveSendTarget(agent ? agent.model : parentChat.model ?? null)
   const snapshot: ModelRef = {
     providerId: resolved.connection.id,
     providerKind: resolved.connection.kind,
@@ -97,6 +141,9 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
     conversationId: parentChatId,
     parentChatId,
     model: snapshot,
+    ...(agent
+      ? { agentId: agent.id, agentSnapshot: snapshotForAgent(agent, snapshot) }
+      : {}),
   })
 
   const controller = registerStreamController(parentChatId)
@@ -107,6 +154,8 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
         'This conversation is too long for the current browser-side safety limit. Start a new conversation or continue in a thread.',
       )
     }
+
+    const transport = withAgentSystemPrompt(agent, conversation)
 
     let assistantContent = ''
     const adapter = getAdapter(resolved.connection.kind)
@@ -119,7 +168,7 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
     }
 
     const response = await adapter.streamChat(resolved.connection, snapshot, {
-      messages: conversation,
+      messages: transport,
       signal: controller.signal,
       onChunk: (chunk) => {
         assistantContent += chunk
@@ -169,7 +218,12 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     throw new Error('Archived conversations cannot accept new sends.')
   }
 
-  const resolved = await resolveSendTarget(thread.model ?? parentChat.model ?? null)
+  // Thread inherits agent binding from its parent in v0 (agent-DM threads).
+  // U11 lands the full participant-snapshot inheritance for channels.
+  const agent = await resolveAgentBinding(parentChat.agentId)
+  const resolved = await resolveSendTarget(
+    agent ? agent.model : thread.model ?? parentChat.model ?? null,
+  )
   const snapshot: ModelRef = {
     providerId: resolved.connection.id,
     providerKind: resolved.connection.kind,
@@ -194,6 +248,9 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     conversationId: threadId,
     parentChatId: thread.parentChatId,
     model: snapshot,
+    ...(agent
+      ? { agentId: agent.id, agentSnapshot: snapshotForAgent(agent, snapshot) }
+      : {}),
   })
 
   await syncRootReplyCountForThread(threadId)
@@ -207,6 +264,8 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
       )
     }
 
+    const transport = withAgentSystemPrompt(agent, conversation)
+
     let assistantContent = ''
     const adapter = getAdapter(resolved.connection.kind)
 
@@ -215,7 +274,7 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     }
 
     const response = await adapter.streamChat(resolved.connection, snapshot, {
-      messages: conversation,
+      messages: transport,
       signal: controller.signal,
       onChunk: (chunk) => {
         assistantContent += chunk

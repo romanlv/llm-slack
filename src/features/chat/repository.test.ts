@@ -279,6 +279,34 @@ describe('thread repository semantics', () => {
     await expect(db.parentChats.count()).resolves.toBe(2)
   })
 
+  it('findOrCreateAgentDm reuses the most recent non-archived agent-DM and creates one otherwise', async () => {
+    const { createAgent } = await import('@/features/agents/agents-repository')
+    const { findOrCreateAgentDm } = await import('@/features/chat/repository')
+    const agent = await createAgent({
+      displayName: 'Critic',
+      model: { providerKind: 'openrouter', providerModelId: 'm' },
+    })
+
+    const first = await findOrCreateAgentDm(agent.id)
+    expect(first.kind).toBe('dm')
+    expect(first.agentId).toBe(agent.id)
+    expect(first.title).toBe('Critic')
+
+    const second = await findOrCreateAgentDm(agent.id)
+    expect(second.id).toBe(first.id)
+
+    // Archive the existing one — a new agent-DM should be created.
+    await db.parentChats.update(first.id, { archivedAt: Date.now() })
+    const third = await findOrCreateAgentDm(agent.id)
+    expect(third.id).not.toBe(first.id)
+    expect(third.agentId).toBe(agent.id)
+  })
+
+  it('findOrCreateAgentDm refuses to create a chat for a missing agent', async () => {
+    const { findOrCreateAgentDm } = await import('@/features/chat/repository')
+    await expect(findOrCreateAgentDm('ghost')).rejects.toThrow(/does not exist/)
+  })
+
   it('seeds the first conversation once when called concurrently', async () => {
     await Promise.all([ensureSeedParentChat(), ensureSeedParentChat()])
 

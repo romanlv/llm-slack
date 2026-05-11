@@ -70,6 +70,33 @@ export async function createParentChat(
   return chat
 }
 
+// Per-agent equivalent of findOrCreateEmptyParentChat. Returns the most
+// recent non-archived agent-DM for `agentId` if one exists, otherwise
+// creates a fresh one snapshotting the agent's current model.
+export async function findOrCreateAgentDm(agentId: string) {
+  const existing = await db.parentChats
+    .where('agentId')
+    .equals(agentId)
+    .filter((chat) => chat.kind === 'dm' && !chat.archivedAt)
+    .sortBy('updatedAt')
+
+  if (existing.length > 0) {
+    return existing[existing.length - 1]
+  }
+
+  const agent = await db.agents.get(agentId)
+  if (!agent) {
+    throw new Error(`Cannot create agent-DM: agent "${agentId}" does not exist.`)
+  }
+
+  return createParentChat({
+    kind: 'dm',
+    agentId,
+    title: agent.displayName,
+    model: agent.model,
+  })
+}
+
 export async function findOrCreateEmptyParentChat() {
   const chats = await db.parentChats.orderBy('updatedAt').reverse().toArray()
 
@@ -343,6 +370,11 @@ export async function createAssistantMessage(input: {
   conversationId: string
   parentChatId: string
   model: ModelRef | undefined
+  // Agent authorship (agent-DM and, later, channel). When agentId is set,
+  // agentSnapshot must also be set so authorship survives a future delete
+  // of the agent definition.
+  agentId?: string
+  agentSnapshot?: ChatMessage['agentSnapshot']
 }) {
   const message: ChatMessage = {
     id: crypto.randomUUID(),
@@ -355,6 +387,8 @@ export async function createAssistantMessage(input: {
     status: 'streaming',
     directReplyCount: 0,
     model: input.model,
+    ...(input.agentId ? { agentId: input.agentId } : {}),
+    ...(input.agentSnapshot ? { agentSnapshot: input.agentSnapshot } : {}),
   }
 
   await db.messages.add(message)

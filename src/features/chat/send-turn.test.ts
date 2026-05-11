@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { archiveParentChat, createParentChat, db, getOrCreateThreadForMessage } from './repository'
 import { sendParentChatTurn, sendThreadTurn } from './send-turn'
+import { createAgent } from '@/features/agents/agents-repository'
 import { openrouterAdapter } from '@/features/providers/adapters/openrouter'
 import { openaiCompatibleAdapter } from '@/features/providers/adapters/openai-compatible'
 import { createProvider } from '@/features/providers/providers-repository'
@@ -133,6 +134,109 @@ describe('send turn lifecycle', () => {
     await createProvider({ kind: 'openrouter', label: 'OpenRouter', apiKey: '' })
 
     await expect(sendParentChatTurn(parentChat.id, 'hi')).rejects.toThrow(/no API key set/i)
+    expect(mockedStreamChat).not.toHaveBeenCalled()
+  })
+
+  it('agent-DM prepends the system prompt and routes through the agent model + snapshot', async () => {
+    mockedStreamChat.mockResolvedValueOnce({ content: 'critic reply', id: 'req-agent' })
+
+    const agent = await createAgent({
+      displayName: 'Critic',
+      model: { providerKind: 'openrouter', providerModelId: 'agent-model' },
+      systemPrompt: 'You are a critic. Push back.',
+    })
+    const parentChat = await createParentChat({
+      kind: 'dm',
+      agentId: agent.id,
+      title: 'DM with critic',
+      model: agent.model,
+    })
+    await seedOpenRouterProvider()
+
+    await sendParentChatTurn(parentChat.id, 'is this a good idea?')
+
+    expect(mockedStreamChat).toHaveBeenCalledTimes(1)
+    const [, modelArg, inputArg] = mockedStreamChat.mock.calls[0]
+    expect(modelArg.providerModelId).toBe('agent-model')
+    // The first transport message must be the agent's system prompt.
+    expect(inputArg.messages[0]).toEqual({
+      role: 'system',
+      content: 'You are a critic. Push back.',
+    })
+    expect(inputArg.messages.at(-1)).toMatchObject({
+      role: 'user',
+      content: 'is this a good idea?',
+    })
+
+    const assistant = await db.messages
+      .where({ conversationId: parentChat.id })
+      .filter((m) => m.role === 'assistant')
+      .first()
+    expect(assistant?.agentId).toBe(agent.id)
+    expect(assistant?.agentSnapshot).toEqual({
+      displayName: 'Critic',
+      model: expect.objectContaining({ providerModelId: 'agent-model' }),
+    })
+  })
+
+  it('model-DM transport carries no system prefix (AE7 byte-for-byte parity)', async () => {
+    mockedStreamChat.mockResolvedValueOnce({ content: 'ok', id: 'r' })
+    const parentChat = await createParentChat({ title: 'plain dm', model: MODEL_A })
+    await seedOpenRouterProvider()
+
+    await sendParentChatTurn(parentChat.id, 'hi')
+
+    const [, , inputArg] = mockedStreamChat.mock.calls[0]
+    expect(inputArg.messages.every((m: { role: string }) => m.role !== 'system')).toBe(true)
+
+    const assistant = await db.messages
+      .where({ conversationId: parentChat.id })
+      .filter((m) => m.role === 'assistant')
+      .first()
+    expect(assistant?.agentId).toBeUndefined()
+    expect(assistant?.agentSnapshot).toBeUndefined()
+  })
+
+  it('omits the system prefix when the agent has an empty system prompt', async () => {
+    mockedStreamChat.mockResolvedValueOnce({ content: 'reply', id: 'r' })
+    const agent = await createAgent({
+      displayName: 'Empty',
+      model: { providerKind: 'openrouter', providerModelId: 'agent-model-2' },
+      systemPrompt: '   ',
+    })
+    const parentChat = await createParentChat({
+      kind: 'dm',
+      agentId: agent.id,
+      title: 'silent prompt',
+      model: agent.model,
+    })
+    await seedOpenRouterProvider()
+
+    await sendParentChatTurn(parentChat.id, 'hi')
+
+    const [, , inputArg] = mockedStreamChat.mock.calls[0]
+    expect(inputArg.messages.every((m: { role: string }) => m.role !== 'system')).toBe(true)
+  })
+
+  it('refuses to send when the agent-DM references a deleted agent (orphan)', async () => {
+    const agent = await createAgent({
+      displayName: 'Will be deleted',
+      model: { providerKind: 'openrouter', providerModelId: 'm' },
+    })
+    const parentChat = await createParentChat({
+      kind: 'dm',
+      agentId: agent.id,
+      title: 'orphan',
+      model: agent.model,
+    })
+    await seedOpenRouterProvider()
+
+    // Orphan the chat — agent definition is gone, parentChat.agentId remains
+    // (the agents-repository delete cascade clears it, but we simulate the
+    // pre-cascade state by deleting directly to verify the runtime guard).
+    await db.agents.delete(agent.id)
+
+    await expect(sendParentChatTurn(parentChat.id, 'still there?')).rejects.toThrow(/orphaned/)
     expect(mockedStreamChat).not.toHaveBeenCalled()
   })
 
