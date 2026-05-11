@@ -428,9 +428,78 @@ describe('v8 migration (turn lifecycle)', () => {
   })
 })
 
+describe('v9 migration (thread participant snapshot)', () => {
+  it('keeps existing chatParticipants intact and the store remains usable with thread-scoped ids', async () => {
+    // Boot a v8 DB with a channel + participants, then upgrade. v9 does
+    // not transform any rows; it documents that chatParticipants.chatId
+    // is now allowed to point to threads.id.
+    const legacy = new Dexie(TEST_DB_NAME)
+    legacy.version(8).stores({
+      parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
+      threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+      messages:
+        'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+      pinnedMessages:
+        'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+      savedMessages: 'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
+      providers: 'id, kind, createdAt',
+      modelOverrides: 'id, providerId, &[providerId+providerModelId]',
+      agents: 'id, createdAt, updatedAt',
+      chatParticipants: 'id, chatId, agentId, [chatId+sortKey], &[chatId+agentId]',
+      channelSettings: 'id',
+      turns: 'id, parentChatId, conversationId, status, [conversationId+createdAt]',
+      providerRequestAttempts:
+        'id, turnId, assistantMessageId, agentId, [turnId+attemptNumber]',
+      settings: 'id',
+    })
+    await legacy.open()
+    try {
+      await legacy.table('parentChats').put({
+        id: 'channel',
+        title: 'c',
+        model: null,
+        kind: 'channel',
+        agentId: null,
+        createdAt: 1,
+        updatedAt: 1,
+        draft: '',
+        lastActivityPreview: '',
+      })
+      await legacy.table('agents').put({
+        id: 'agent',
+        displayName: 'A',
+        model: { providerKind: 'openrouter', providerModelId: 'm' },
+        systemPrompt: '',
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await legacy.table('chatParticipants').put({
+        id: 'p',
+        chatId: 'channel',
+        agentId: 'agent',
+        mode: 'auto-decide',
+        sortKey: 1,
+        createdAt: 1,
+      })
+    } finally {
+      legacy.close()
+    }
+
+    const upgraded = new LlmSlackDatabase(TEST_DB_NAME)
+    await upgraded.open()
+    try {
+      expect(upgraded.verno).toBeGreaterThanOrEqual(9)
+      const rows = await upgraded.chatParticipants.toArray()
+      expect(rows).toHaveLength(1)
+    } finally {
+      upgraded.close()
+    }
+  })
+})
+
 describe('module singleton db', () => {
   it('opens cleanly on a fresh IDB (no legacy rows)', async () => {
     await db.open()
-    expect(db.verno).toBeGreaterThanOrEqual(8)
+    expect(db.verno).toBeGreaterThanOrEqual(9)
   })
 })

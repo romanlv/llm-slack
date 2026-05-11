@@ -147,21 +147,37 @@ export async function assertDbInvariants(db: LlmSlackDatabase): Promise<void> {
     }
   }
 
-  // U5 invariants — chatParticipants + channelSettings.
+  // U5 invariants — chatParticipants + channelSettings. After U11 the
+  // chatId may resolve to either a parentChats row or a threads row whose
+  // parent chat is kind='channel'.
   const participants = await db.chatParticipants.toArray()
   const seen = new Set<string>()
   for (const row of participants) {
     const chat = parentChats.find((c) => c.id === row.chatId)
-    if (!chat) {
+    const thread = threads.find((t) => t.id === row.chatId)
+    if (!chat && !thread) {
       failures.push({
         rule: 'chatParticipants.chatId resolves',
-        detail: `participant "${row.id}" references missing chat "${row.chatId}"`,
+        detail: `participant "${row.id}" references missing chat/thread "${row.chatId}"`,
       })
-    } else if (chat.kind !== 'channel') {
+    } else if (chat && chat.kind !== 'channel') {
       failures.push({
         rule: 'chatParticipants only on channel chats',
         detail: `participant "${row.id}" references chat "${row.chatId}" with kind="${chat.kind}"`,
       })
+    } else if (thread) {
+      const owningParent = parentChats.find((c) => c.id === thread.parentChatId)
+      if (!owningParent) {
+        failures.push({
+          rule: 'thread-scoped participant has a parent chat',
+          detail: `participant "${row.id}" references thread "${row.chatId}" with missing parent`,
+        })
+      } else if (owningParent.kind !== 'channel') {
+        failures.push({
+          rule: 'thread-scoped participant must root in a channel chat',
+          detail: `participant "${row.id}" lives under thread "${row.chatId}" whose parent kind="${owningParent.kind}"`,
+        })
+      }
     }
     if (!agentIds.has(row.agentId)) {
       failures.push({

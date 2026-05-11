@@ -382,6 +382,67 @@ describe('thread repository semantics', () => {
     ).rejects.toThrow(/agentId must be null/)
   })
 
+  it('thread of a channel snapshots the participant set at creation time (U11)', async () => {
+    const { createAgent } = await import('@/features/agents/agents-repository')
+    const {
+      addChannelParticipant,
+      getOrCreateThreadForMessage,
+      listChannelParticipants,
+      removeChannelParticipant,
+    } = await import('@/features/chat/repository')
+
+    const channel = await createParentChat({ kind: 'channel', title: 'launch' })
+    const a = await createAgent({
+      displayName: 'A',
+      model: { providerKind: 'openrouter', providerModelId: 'm' },
+    })
+    const b = await createAgent({
+      displayName: 'B',
+      model: { providerKind: 'openrouter', providerModelId: 'm' },
+    })
+    await addChannelParticipant({ chatId: channel.id, agentId: a.id })
+    await addChannelParticipant({ chatId: channel.id, agentId: b.id })
+
+    const rootMessage = await db.messages.add(
+      message({
+        id: 'root',
+        conversationId: channel.id,
+        parentChatId: channel.id,
+        role: 'user',
+      }),
+    )
+    void rootMessage
+    const thread = await getOrCreateThreadForMessage('root')
+
+    const threadParticipants = await listChannelParticipants(thread.id)
+    expect(threadParticipants.map((p) => p.agentId).sort()).toEqual([a.id, b.id].sort())
+
+    // After thread creation, removing A from the parent channel does NOT
+    // remove A from the thread (frozen-branch rule, R17).
+    await removeChannelParticipant(channel.id, a.id)
+    const stillInThread = await listChannelParticipants(thread.id)
+    expect(stillInThread.map((p) => p.agentId)).toContain(a.id)
+  })
+
+  it('thread of a DM does not create participant rows', async () => {
+    const {
+      getOrCreateThreadForMessage,
+      listChannelParticipants,
+    } = await import('@/features/chat/repository')
+
+    const dm = await createParentChat({ kind: 'dm', title: 'dm' })
+    await db.messages.add(
+      message({
+        id: 'root-dm',
+        conversationId: dm.id,
+        parentChatId: dm.id,
+        role: 'user',
+      }),
+    )
+    const thread = await getOrCreateThreadForMessage('root-dm')
+    expect(await listChannelParticipants(thread.id)).toHaveLength(0)
+  })
+
   it('seeds the first conversation once when called concurrently', async () => {
     await Promise.all([ensureSeedParentChat(), ensureSeedParentChat()])
 

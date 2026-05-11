@@ -328,6 +328,31 @@ export async function getOrCreateThreadForMessage(messageId: string) {
   }
 
   await db.threads.add(thread)
+
+  // U11 — thread participant snapshot. When a thread roots off a channel
+  // (directly or transitively), copy the participant set + per-agent mode
+  // at creation time. Later additions/removals on the channel do not
+  // flow into the thread (R17 frozen-branch rule extended to participants).
+  if (parentChat.kind === 'channel') {
+    const sourceChatId = parentThreadId ?? rootMessage.parentChatId
+    const sourceParticipants = await db.chatParticipants
+      .where('chatId')
+      .equals(sourceChatId)
+      .sortBy('sortKey')
+    if (sourceParticipants.length > 0) {
+      const baseTime = Date.now()
+      const snapshot: ChannelParticipant[] = sourceParticipants.map((src, index) => ({
+        id: crypto.randomUUID(),
+        chatId: thread.id,
+        agentId: src.agentId,
+        mode: src.mode,
+        sortKey: baseTime + index,
+        createdAt: baseTime,
+      }))
+      await db.chatParticipants.bulkAdd(snapshot)
+    }
+  }
+
   return thread
 }
 
@@ -985,20 +1010,33 @@ export async function syncRootReplyCountForThread(threadId: string) {
 // any rule violation so callers get a clear failure (the test fixtures
 // catch the mistake at write time, not at orchestrator time).
 
+// A "channel target" is either a parent channel chat or a thread whose
+// parent chat is kind='channel' (R17/U11). Both are valid hosts for
+// chatParticipants.
 export async function assertChannelChat(chatId: string) {
   const chat = await db.parentChats.get(chatId)
-  if (!chat) {
-    throw new Error(`Channel "${chatId}" does not exist.`)
+  if (chat) {
+    if (chat.kind !== 'channel') {
+      throw new Error(`Chat "${chatId}" is not a channel (kind="${chat.kind}").`)
+    }
+    if (chat.agentId) {
+      throw new Error(
+        `Chat "${chatId}" has kind="channel" but also agentId="${chat.agentId}". Invariant violation.`,
+      )
+    }
+    return chat
   }
-  if (chat.kind !== 'channel') {
-    throw new Error(`Chat "${chatId}" is not a channel (kind="${chat.kind}").`)
+  const thread = await db.threads.get(chatId)
+  if (thread) {
+    const parent = await db.parentChats.get(thread.parentChatId)
+    if (!parent || parent.kind !== 'channel') {
+      throw new Error(
+        `Thread "${chatId}" is not under a channel; channel ops are not allowed here.`,
+      )
+    }
+    return parent
   }
-  if (chat.agentId) {
-    throw new Error(
-      `Chat "${chatId}" has kind="channel" but also agentId="${chat.agentId}". Invariant violation.`,
-    )
-  }
-  return chat
+  throw new Error(`Channel target "${chatId}" does not exist.`)
 }
 
 export async function listChannelParticipants(chatId: string): Promise<ChannelParticipant[]> {
