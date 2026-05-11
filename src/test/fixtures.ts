@@ -163,4 +163,43 @@ export async function seedAgentDm(options: SeedAgentDmOptions): Promise<ParentCh
   return chat
 }
 
-// NOTE: seedChannel lands alongside U5 (chatParticipants, channelSettings).
+export interface SeedChannelParticipant {
+  agent: import('@/features/chat/domain').Agent
+  mode?: import('@/features/chat/domain').ParticipationMode
+}
+
+export interface SeedChannelOptions {
+  id?: string
+  title?: string
+  participants?: SeedChannelParticipant[]
+  settings?: Partial<
+    Omit<import('@/features/chat/domain').ChannelSettings, 'id' | 'createdAt' | 'updatedAt'>
+  >
+}
+
+export async function seedChannel(
+  options: SeedChannelOptions = {},
+): Promise<ParentChat> {
+  const now = Date.now()
+  const chat: ParentChat = {
+    id: options.id ?? seq('chan'),
+    title: options.title ?? 'Test channel',
+    model: null,
+    kind: 'channel',
+    agentId: null,
+    createdAt: now,
+    updatedAt: now,
+    draft: '',
+    lastActivityPreview: '',
+  }
+  await db.parentChats.add(chat)
+
+  const { addChannelParticipant, setChannelSettings } = await import(
+    '@/features/chat/repository'
+  )
+  await setChannelSettings(chat.id, options.settings ?? {})
+  for (const p of options.participants ?? []) {
+    await addChannelParticipant({ chatId: chat.id, agentId: p.agent.id, mode: p.mode })
+  }
+  return chat
+}

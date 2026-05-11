@@ -147,11 +147,58 @@ export async function assertDbInvariants(db: LlmSlackDatabase): Promise<void> {
     }
   }
 
+  // U5 invariants — chatParticipants + channelSettings.
+  const participants = await db.chatParticipants.toArray()
+  const seen = new Set<string>()
+  for (const row of participants) {
+    const chat = parentChats.find((c) => c.id === row.chatId)
+    if (!chat) {
+      failures.push({
+        rule: 'chatParticipants.chatId resolves',
+        detail: `participant "${row.id}" references missing chat "${row.chatId}"`,
+      })
+    } else if (chat.kind !== 'channel') {
+      failures.push({
+        rule: 'chatParticipants only on channel chats',
+        detail: `participant "${row.id}" references chat "${row.chatId}" with kind="${chat.kind}"`,
+      })
+    }
+    if (!agentIds.has(row.agentId)) {
+      failures.push({
+        rule: 'chatParticipants.agentId resolves',
+        detail: `participant "${row.id}" references missing agent "${row.agentId}"`,
+      })
+    }
+    const key = `${row.chatId}::${row.agentId}`
+    if (seen.has(key)) {
+      failures.push({
+        rule: 'chatParticipants unique by (chatId, agentId)',
+        detail: `duplicate participant for chat="${row.chatId}" agent="${row.agentId}"`,
+      })
+    }
+    seen.add(key)
+  }
+
+  const settingsRows = await db.channelSettings.toArray()
+  for (const row of settingsRows) {
+    const chat = parentChats.find((c) => c.id === row.id)
+    if (!chat) {
+      failures.push({
+        rule: 'channelSettings.id resolves',
+        detail: `channelSettings "${row.id}" references missing chat`,
+      })
+    } else if (chat.kind !== 'channel') {
+      failures.push({
+        rule: 'channelSettings only on channel chats',
+        detail: `channelSettings "${row.id}" references chat with kind="${chat.kind}"`,
+      })
+    }
+  }
+
   // EXTENSION POINTS for later units:
-  // - U5: chatParticipants.chatId resolves to a kind='channel' parent (or, post-U11,
-  //   a thread whose parent is kind='channel'); chatParticipants.agentId resolves;
-  //   (chatId, agentId) is unique; no chatParticipants on kind='dm' chats.
   // - U6: every closed turn has a stopReason; every attempt belongs to a turn.
+  // - U11: chatParticipants.chatId may resolve to threads.id whose parent
+  //   chat has kind='channel'.
 
   if (failures.length > 0) {
     throw new InvariantViolation(failures)

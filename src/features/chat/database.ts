@@ -2,6 +2,8 @@ import Dexie, { type EntityTable } from 'dexie'
 
 import type {
   Agent,
+  ChannelParticipant,
+  ChannelSettings,
   ChatMessage,
   ConversationThread,
   ParentChat,
@@ -20,6 +22,8 @@ export class LlmSlackDatabase extends Dexie {
   providers!: EntityTable<ProviderConnection, 'id'>
   modelOverrides!: EntityTable<ModelOverride, 'id'>
   agents!: EntityTable<Agent, 'id'>
+  chatParticipants!: EntityTable<ChannelParticipant, 'id'>
+  channelSettings!: EntityTable<ChannelSettings, 'id'>
   settings!: EntityTable<AppSettings, 'id'>
 
   constructor(name = 'llm-slack') {
@@ -230,6 +234,29 @@ export class LlmSlackDatabase extends Dexie {
               row.kind = 'dm'
             }
           })
+      })
+
+    // v7: channel-shaped persistence. Empty tables only; no backfill needed
+    // because no channel rows can exist yet. messages.agentId is already
+    // declared at the type level (v6 schema) and stays unindexed in v0 — we
+    // only query by conversationId, not by agentId.
+    this.version(7)
+      .stores({
+        parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
+        threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+        messages:
+          'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+        pinnedMessages:
+          'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+        savedMessages:
+          'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
+        providers: 'id, kind, createdAt',
+        modelOverrides: 'id, providerId, &[providerId+providerModelId]',
+        agents: 'id, createdAt, updatedAt',
+        chatParticipants:
+          'id, chatId, agentId, [chatId+sortKey], &[chatId+agentId]',
+        channelSettings: 'id',
+        settings: 'id',
       })
   }
 }

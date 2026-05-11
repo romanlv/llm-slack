@@ -71,6 +71,42 @@ export interface AgentMessageSnapshot {
   model: ModelRef
 }
 
+export type ParticipationMode = 'auto-decide' | 'mention-only'
+
+// Per-channel-per-agent participation row. chatId points to a parentChats
+// row with kind='channel' in U5; U11 extends this to also accept threads.id.
+export interface ChannelParticipant {
+  id: string
+  chatId: string
+  agentId: string
+  mode: ParticipationMode
+  // Strictly-monotonic per chatId so listing has a stable order even when
+  // two adds happen in the same millisecond.
+  sortKey: number
+  createdAt: number
+}
+
+export interface ChannelSettings {
+  id: string // === chatId
+  maxChainedSubTurns: number
+  maxMessagesPerAgentPerInput: number
+  tokenBudgetPerInput: number
+  defaultParticipationMode: ParticipationMode
+  // Slack-like behavior is the v0 default; channel owners can disable to
+  // keep replies pinned to the main timeline (R14e).
+  allowAgentThreading: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export const DEFAULT_CHANNEL_SETTINGS: Omit<ChannelSettings, 'id' | 'createdAt' | 'updatedAt'> = {
+  maxChainedSubTurns: 3,
+  maxMessagesPerAgentPerInput: 2,
+  tokenBudgetPerInput: 200_000,
+  defaultParticipationMode: 'auto-decide',
+  allowAgentThreading: true,
+}
+
 export interface ChatMessage {
   id: string
   conversationType: ConversationType

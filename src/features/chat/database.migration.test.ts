@@ -287,9 +287,83 @@ describe('v6 migration (multi-agent foundation)', () => {
   })
 })
 
+async function withV6Db(seed: (legacy: Dexie) => Promise<void>) {
+  // Bring the legacy DB to v6, mirroring every prior version inline so the
+  // upgrade chain doesn't drift away from production.
+  const legacy = new Dexie(TEST_DB_NAME)
+  legacy.version(1).stores({
+    parentChats: 'id, createdAt, updatedAt, archivedAt',
+    threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+    messages:
+      'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+    settings: 'id',
+  })
+  legacy.version(2).stores({
+    pinnedMessages:
+      'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+  })
+  legacy.version(3).stores({
+    savedMessages: 'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
+  })
+  legacy.version(4).stores({
+    parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt',
+  })
+  legacy.version(5).stores({
+    providers: 'id, kind, createdAt',
+    modelOverrides: 'id, providerId, &[providerId+providerModelId]',
+  })
+  legacy.version(6).stores({
+    parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
+    agents: 'id, createdAt, updatedAt',
+  })
+  await legacy.open()
+  try {
+    await seed(legacy)
+  } finally {
+    legacy.close()
+  }
+}
+
+describe('v7 migration (channel persistence)', () => {
+  it('keeps existing data readable and the new channel tables start empty', async () => {
+    await withV6Db(async (legacy) => {
+      await legacy.table('parentChats').put({
+        id: 'p',
+        title: 'dm',
+        model: { providerKind: 'openrouter', providerModelId: 'm' },
+        kind: 'dm',
+        createdAt: 1,
+        updatedAt: 1,
+        draft: '',
+        lastActivityPreview: '',
+      })
+      await legacy.table('agents').put({
+        id: 'a',
+        displayName: 'Critic',
+        model: { providerKind: 'openrouter', providerModelId: 'm' },
+        systemPrompt: '',
+        createdAt: 1,
+        updatedAt: 1,
+      })
+    })
+
+    const upgraded = new LlmSlackDatabase(TEST_DB_NAME)
+    await upgraded.open()
+    try {
+      expect(upgraded.verno).toBeGreaterThanOrEqual(7)
+      expect(await upgraded.parentChats.count()).toBe(1)
+      expect(await upgraded.agents.count()).toBe(1)
+      expect(await upgraded.chatParticipants.count()).toBe(0)
+      expect(await upgraded.channelSettings.count()).toBe(0)
+    } finally {
+      upgraded.close()
+    }
+  })
+})
+
 describe('module singleton db', () => {
   it('opens cleanly on a fresh IDB (no legacy rows)', async () => {
     await db.open()
-    expect(db.verno).toBeGreaterThanOrEqual(6)
+    expect(db.verno).toBeGreaterThanOrEqual(7)
   })
 })
