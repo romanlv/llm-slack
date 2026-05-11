@@ -27,7 +27,6 @@ import {
   countStartedBranchesByParentChat,
   db,
   deleteParentChat,
-  findOrCreateEmptyParentChat,
   previewText,
   restoreParentChat,
   toggleStarParentChat,
@@ -35,6 +34,7 @@ import {
   type ConversationThread,
   type ParentChat,
 } from '@/features/chat/repository'
+import { NewChatModal } from '@/features/chat/components/new-chat-modal'
 import { listProviders } from '@/features/providers/providers-repository'
 import {
   DEFAULT_USER_NAME,
@@ -254,6 +254,7 @@ export function ChatShell() {
   const location = useLocation()
   const [search, setSearch] = useState('')
   const [showArchived, setShowArchived] = useState(false)
+  const [newChatOpen, setNewChatOpen] = useState(false)
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
   const { activeChatId, activeThreadId } = parseChatPath(location.pathname)
 
@@ -290,12 +291,8 @@ export function ChatShell() {
     [] as Array<ChatMessage | undefined>,
   )
 
-  const handleNewParentChat = async () => {
-    const parentChat = await findOrCreateEmptyParentChat()
-    await navigate({
-      to: '/chat/$chatId',
-      params: { chatId: parentChat.id },
-    })
+  const handleNewParentChat = () => {
+    setNewChatOpen(true)
   }
 
   const handleDeleteParentChat = async (parentChat: ParentChat) => {
@@ -613,6 +610,8 @@ export function ChatShell() {
       <main className="min-h-0 min-w-0 overflow-hidden bg-surface shadow-[inset_1px_0_0_var(--line)]">
         <Outlet />
       </main>
+
+      <NewChatModal onOpenChange={setNewChatOpen} open={newChatOpen} />
     </div>
   )
 }

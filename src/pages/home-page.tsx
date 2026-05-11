@@ -1,9 +1,9 @@
-import { useNavigate } from '@tanstack/react-router'
+import { useState } from 'react'
 import { Bookmark, Database, GitBranch, Hash, Pin } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { findOrCreateEmptyParentChat } from '@/features/chat/repository'
+import { NewChatModal } from '@/features/chat/components/new-chat-modal'
 import heroImage from '@/assets/hero.png'
 
 const pillars = [
@@ -30,15 +30,7 @@ const pillars = [
 ]
 
 export function HomePage() {
-  const navigate = useNavigate()
-
-  const handleStart = async () => {
-    const parentChat = await findOrCreateEmptyParentChat()
-    await navigate({
-      to: '/chat/$chatId',
-      params: { chatId: parentChat.id },
-    })
-  }
+  const [newChatOpen, setNewChatOpen] = useState(false)
 
   return (
     <div className="grid min-h-[calc(100vh-3rem)] gap-8 overflow-hidden bg-surface px-5 py-6 md:px-8 md:py-8 xl:grid-cols-[minmax(0,0.96fr)_minmax(420px,0.78fr)] xl:items-center">
@@ -74,7 +66,7 @@ export function HomePage() {
           </span>
         </div>
         <div className="mt-8 flex flex-wrap gap-3">
-          <Button onClick={handleStart} size="lg">
+          <Button onClick={() => setNewChatOpen(true)} size="lg">
             Start a conversation
           </Button>
         </div>
@@ -148,6 +140,8 @@ export function HomePage() {
           ))}
         </div>
       </section>
+
+      <NewChatModal onOpenChange={setNewChatOpen} open={newChatOpen} />
     </div>
   )
 }
