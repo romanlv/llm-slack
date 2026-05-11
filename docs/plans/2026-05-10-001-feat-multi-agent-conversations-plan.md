@@ -1,7 +1,7 @@
 ---
 title: Multi-agent conversations foundation
 type: feat
-status: active
+status: shipped
 date: 2026-05-10
 origin: docs/brainstorms/multi-agent-conversations-requirements.md
 ---
@@ -31,7 +31,7 @@ Branch: `feat/multi-agent-foundation`. Test suite: 264 passing across 34 files; 
 | U9 — Channel creation flow | ✅ Done | `efaf6bb` | Adds `createChannel` atomic repo helper (chat + settings + participants in one transaction). Channel tab now shows the name input + agent multi-select + per-agent mode picker (auto-decide / mention-only). |
 | U10 — Channel UI | ✅ Done (2 slices) | slice 1 `684200b`, slice 2 _pending commit_ | Slice 1: per-message agent identity, `ChannelSettingsDialog` with Agents + Behavior tabs. Slice 2: Cancel button on running turns via `interruptActiveTurn` + orchestrator loop early-bail; sidebar DM-internal marker shipped in U13. |
 | U13 — Sidebar restructure | ✅ Done | _pending commit_ | Dedicated "Channels" section above Recent. Recent/Starred filter to `kind='dm'`. `DmRowGlyph` renders an AgentDot for agent-DMs and `#` for model-DMs — closes out U10's sidebar-marker carry-over in the same touch. |
-| U12 — Docs update | ⏳ Not started | — | Land after all UI is in. |
+| U12 — Docs update | ✅ Done | _pending commit_ | `docs/architecture.md` gains a Conversation Kinds + Channel Orchestration section and a refreshed Streaming/Turn Lifecycle. `docs/db-schema.md` adds the three new tables, the kind discriminator, the channel-only invariants, and promotes the realised tables. `docs/tasks.md` checks off the two planned items and adds a multi-agent follow-ups section. |
 
 ### Deferrals inside completed Phase 1
 
@@ -45,7 +45,7 @@ These were called out in U7's commit message and are not silent gaps. Each lands
 
 Phase 2 is in flight. Next-session entry point:
 
-- **U2, U4, U9, U10 (both slices), and U13 are shipped.** Remaining: **U12** (architecture/schema docs update).
+- **Plan complete — all units shipped.** Last remaining surface is the user's own merge/PR step. All Phase-2 UI units (U2, U4, U9, U10 ×2, U13) plus the U12 docs landed in this branch.
 - All Phase-1 invariants are exercised by `assertDbInvariants` — call it at the end of any new integration test to catch cross-table regressions for free.
 - Design references at `docs/design/2026-05-10-multi-agent-conversations/direction-b-agents.jsx` are the primary UI source for U2/U4/U9/U10. See the [Design References](#design-references) section.
 - `pnpm test` and `pnpm typecheck` are the green-bar gate; the husky pre-commit hook enforces both.
@@ -857,7 +857,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U12. Update architecture.md and db-schema.md ⏳ not started
+### U12. Update architecture.md and db-schema.md ✅ shipped
 
 **Goal:** Architecture and schema docs reflect the new shape. `AGENTS.md` constraint: "When a feature intentionally violates this guide, update the guide in the same change with the reason."
 

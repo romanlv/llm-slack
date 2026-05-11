@@ -8,22 +8,26 @@ update this document with the new decision and rationale.
 ## Current Shape
 
 llm-slack is a browser-first React application with local IndexedDB persistence
-and direct OpenRouter calls from the browser.
+and direct provider calls from the browser (multi-provider via adapters).
 
 The current codebase is small and understandable:
 
 - `src/router.tsx` defines the route tree.
-- `src/app/app-shell.tsx` owns the top-level layout and sidebar.
+- `src/app/app-shell.tsx` is a thin root layout; `src/app/chat-shell.tsx`
+  owns the chat sidebar (with a dedicated Channels section above Recent).
 - `src/pages/` contains route adapters.
-- `src/features/chat/` contains the parent-chat and thread experience. Keep
-  this name, but keep its ownership narrow: conversation state, messages,
-  threads, branch context, and turn submission. App shell, provider adapters,
-  and settings belong elsewhere.
-- `src/features/providers/` contains the provider contract, OpenRouter
-  transport, and model metadata.
+- `src/features/chat/` contains the parent-chat, thread, channel, and
+  turn-lifecycle experience. Keep this name, but keep its ownership narrow:
+  conversation state, messages, threads, branch context, channel
+  orchestration, and turn submission. App shell, provider adapters, and
+  settings belong elsewhere.
+- `src/features/agents/` contains the agents library (definition CRUD,
+  AgentDot identity rendering, editor UI). Agents are reusable across
+  agent-DMs and channels.
+- `src/features/providers/` contains the provider contract, multi-provider
+  adapters, and model metadata.
 - `src/features/settings/` contains settings persistence and settings page
-  content.
-- `src/features/model-selection/` currently contains reusable model controls.
+  content (including the agents library entry under the AI nav group).
 
 This is a good MVP shape, but several boundaries are too loose for sustained
 feature work. The main architectural goal is to keep product behavior explicit
@@ -235,6 +239,83 @@ The current `ParentChatWorkspace` should eventually be split into components
 such as `ParentTimeline`, `ThreadPane`, `ConversationComposer`, `MessageBlock`,
 `LineageBar`, and `useConversationMessages`.
 
+## Conversation Kinds
+
+A `parentChats` row carries a `kind: 'dm' | 'channel'` discriminator. There
+is one conversation primitive, three shapes:
+
+- **Model DM** (`kind='dm'`, `agentId=null`): today's default. One model,
+  picked in the composer. AE7 byte-for-byte parity is enforced — sending
+  in a model-DM produces the same transport payload that the pre-channel
+  code did.
+- **Agent DM** (`kind='dm'`, `agentId` set): 1:1 chat with a reusable
+  agent. The agent's `systemPrompt` is prepended as a `{role:'system'}`
+  message; the agent's `model` overrides the chat-level model.
+- **Channel** (`kind='channel'`, `agentId=null`): a room with a roster of
+  agents. The orchestrator drives bounded fan-out; each agent decides
+  whether to respond via a sentinel-silence convention.
+
+Invariants:
+
+- `parentChats.agentId` must be null when `kind='channel'`.
+- `chatParticipants` rows are only allowed on channel hosts (a channel
+  parent chat or a thread under one).
+- A thread of a channel snapshots its participants at thread creation —
+  frozen-branch rule extended to participants (R17). Adds and removes on
+  the parent channel do not change an already-created thread's roster.
+- Per-message agent identity is captured as an `agentSnapshot` (display
+  name + model ref) so deleting the agent definition does not break
+  history rendering.
+
+## Channel Orchestration
+
+The channel orchestrator (`src/features/chat/orchestrator.ts`) is the
+single owner of a channel turn's lifecycle. It runs entirely behind the
+same `Turn` + `providerRequestAttempt` tables used by DM sends, so all
+existing repair, ownership, and cancellation rules apply to channels for
+free.
+
+Loop sketch:
+
+```
+runChannelTurn(chatId, userMessageId):
+  turn = openTurn(...)
+  loop until stop:
+    if turn was closed externally → return       (user-interrupt early-bail)
+    candidates = selectCandidates(...)
+    if no candidates → closeTurn(no-trigger); return
+    if step over cap → closeTurn(cap-hit); return
+    fanOut = Promise.allSettled(runOneAttempt(c) for c in candidates)
+    if no message produced → closeTurn(no-trigger|error); return
+  closeTurn(complete)
+```
+
+- **Candidate selection (R10).** Auto-decide agents that did not just
+  speak; plus mention-only agents named in the latest event (parser is
+  `src/features/chat/mentions.ts`, case-insensitive longest match).
+- **Decide-to-respond (R11).** Each auto-decide candidate gets a single
+  provider call. A sentinel-silence convention (parsed by
+  `src/features/chat/decide-to-respond.ts`) means the orchestrator can
+  decide "yes/no" + "where" + content in one round-trip. Empty or
+  whitespace-only responses are treated as silence.
+- **Stop reasons.** Every closed turn carries one of `complete |
+  no-trigger | cap-hit | user-interrupt | error`. Stop reasons map to
+  attempt-level statuses via `attemptStatusFor` in `turn-lifecycle.ts`.
+- **Caps (R14).** `maxChainedSubTurns`, `maxMessagesPerAgentPerInput`,
+  and `tokenBudgetPerInput` are enforced at the orchestrator boundary,
+  not inside individual attempts. Token-budget aggregation is the
+  open follow-up (see `docs/tasks.md` "multi-agent follow-ups").
+- **User interrupt.** `interruptActiveTurn(parentChatId)` closes the
+  turn with `user-interrupt` and aborts any registered stream
+  controller. The orchestrator's loop guard observes the closed turn at
+  the top of the next iteration and bails before launching another
+  step. Per-call `attemptStillCurrent` checks gate writes inside each
+  attempt so already-in-flight chunks never overwrite a cancelled
+  message.
+- **Materialized summaries.** `closeTurn` is the single writer for
+  `ParentChat.updatedAt` and `lastActivityPreview` after a channel
+  turn — fan-out attempts do not bump those fields independently.
+
 ## Data Model Guidelines
 
 Parent chats and threads are different objects and should remain separate.
@@ -316,37 +397,66 @@ deletion produces an explicit unavailable state.
 
 ## Streaming And Turn Lifecycle
 
-Sending a message should be represented as an explicit lifecycle:
+Sending a message is represented as an explicit lifecycle in
+`src/features/chat/turn-lifecycle.ts` plus `send-turn.ts` (DM dispatcher)
+and `orchestrator.ts` (channel dispatcher):
 
 1. Validate input and conversation state.
 2. Persist the user message.
-3. Persist a pending assistant message or turn record.
-4. Start provider request with an `AbortSignal` and persisted
-   `requestAttemptId`.
+3. `openTurn` (always — DM creates a one-attempt turn, channel fans out).
+4. `openAttempt(turnId, agentId?, modelRef, assistantMessageId)` returns
+   a `{ attempt, controller }` pair. The provider call uses
+   `controller.signal`.
 5. Append streamed chunks to the assistant message.
 6. Persist provider request id and usage as they arrive.
-7. Mark the assistant message `complete` or `error`.
-8. Update conversation summaries in the same service boundary.
+7. `completeAttempt | failAttempt | cancelAttempt | markAttemptDecidedSilent`
+   when the call ends.
+8. `closeTurn(turnId, stopReason)` is the single writer for `status='closed'`
+   and the channel's materialized summary fields.
 
-All stream callbacks must verify that the attempt is still current before
-writing chunks, request ids, usage, or final status. This prevents stale chunks
-from an old stream from mutating a newer assistant message.
+All stream callbacks verify `attemptStillCurrent(attemptId)` before
+writing chunks, request ids, usage, or final status. This prevents stale
+chunks from an old stream from mutating a newer assistant message — and
+makes user-interrupt safe under channel fan-out where many attempts run
+in parallel.
 
-Needed resilience work:
+Stop-reason taxonomy (recorded on the closing `turns` row):
 
-- Add `AbortController` support to provider calls.
-- On startup, find stale `streaming` messages, preserve partial content, mark
-  them `error` or `cancelled`, clear conversation locks, and avoid auto-resuming
-  unless the provider supports durable continuation.
-- Prevent concurrent sends in the same conversation unless explicitly supported.
+- `complete` — loop terminated naturally (DM finished, or every channel
+  candidate has had its say within the caps).
+- `no-trigger` — a channel step produced no messages (every candidate
+  was silent, or there were no candidates to begin with).
+- `cap-hit` — `maxChainedSubTurns`, `maxMessagesPerAgentPerInput`, or
+  the planned token-budget cap stopped the loop.
+- `user-interrupt` — UI Cancel button (or another caller of
+  `interruptActiveTurn`) closed the turn.
+- `error` — DM provider call threw, or every fan-out attempt in a
+  channel step errored.
+
+Cancellation flow (DM and channel):
+
+- `interruptActiveTurn(parentChatId)` in `turn-lifecycle.ts` is the
+  single repo entry point.
+- `abortStreamsForConversation(conversationId)` aborts the DM
+  `AbortController` registered in `stream-controllers.ts` — the
+  send-turn `catch` then closes the turn with `user-interrupt`.
+- For channels (which do not register a controller), `closeTurn` is
+  called directly. The orchestrator's loop guard observes the closed
+  turn and bails on the next iteration.
+
+Still open:
+
+- On startup, find stale `streaming` messages, preserve partial content,
+  mark them `error` or `cancelled`, clear conversation locks, and avoid
+  auto-resuming unless the provider supports durable continuation
+  (P0c.3).
+- Prevent concurrent sends in the same conversation unless explicitly
+  supported.
 - Separate user-visible provider errors from internal diagnostic details.
-- Preserve retry metadata: provider, model, params, context snapshot or message
-  revisions, user/assistant message ids, provider request id, error code,
-  retryable flag, attempt number, retry-of id, timestamps, and usage/cost
-  already received.
-
-Longer term, prefer a first-class `turns` or `providerRequests` table over
-encoding the whole send lifecycle in message rows.
+- Preserve retry metadata in the turns/attempt rows: provider, model,
+  params, context snapshot or message revisions, user/assistant message
+  ids, provider request id, error code, retryable flag, attempt number,
+  retry-of id, timestamps, and usage/cost already received.
 
 ## Provider Abstraction
 

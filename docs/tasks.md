@@ -24,8 +24,8 @@
 # planned
 
 - [ ] regenerate assistant reply with user hint
-- [ ] defining agents (model + prompt + tools)
-- [ ] allow multiple agents to participate in a chat
+- [x] defining agents (model + prompt) — `/settings/agents` library; tools deferred
+- [x] allow multiple agents to participate in a chat — channels with `auto-decide` / `mention-only` modes, bounded fan-out, decide-to-respond, stop reasons
 - [ ] global search / command palette (⌘K)
 - [ ] slash commands (/branch parser; extensible registry)
 - [ ] file attachments (composer paperclip, Files tab)
@@ -38,3 +38,25 @@
 - [ ] export chats
 - [ ] show pricing per chat
 - [ ] anthropic proxy: thin pass-through (Cloudflare Worker / Vercel function) so direct-browser Claude calls work without the org-level CORS opt-in, and so OAuth tokens (`sk-ant-oat…`) can be used at all. Once shipped, drop the CORS step from the Anthropic auth method in `src/features/settings/provider-definitions.ts` and re-add the OAuth `authMethods` entry.
+
+# multi-agent follow-ups
+
+Deferred from the multi-agent foundation (see
+`docs/plans/2026-05-10-001-feat-multi-agent-conversations-plan.md`):
+
+- [ ] agent memories and agent tools (R5 future-proofing already in the type)
+- [ ] pluggable orchestration strategies / swappable scheduler
+- [ ] additional participation modes beyond `auto-decide` / `mention-only`
+      (regex, keyword, conditional)
+- [ ] per-agent (rather than per-turn) cost metering
+- [ ] streaming-UX refinements for many in-flight channel agents
+- [ ] agent-library UX: search, tagging, sharing, import/export
+- [ ] promote a DM to a channel; carry DM context into a new channel; demote
+- [ ] expandable agent-DM rows in the sidebar (per-agent chat history)
+- [ ] background recovery for stale `streaming` rows on app start
+      (architecture P0c.3)
+- [ ] decide-status hint UI ("agent X is deciding")
+- [ ] decide-to-respond pre-call cost optimization (settings knob)
+- [ ] thread-write path for `respondIn: 'thread'` agent responses (R13a;
+      orchestrator currently parses but persists on the main timeline)
+- [ ] token-budget cap aggregation across `providerRequestAttempts.usage`
