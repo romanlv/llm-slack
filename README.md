@@ -6,9 +6,15 @@ Most AI chat tools are one long flat transcript. llm-slack experiments with a
 different shape: keep the main conversation readable, then branch into
 message-level threads when an idea needs its own side path.
 
-The project is currently a local-first prototype. It runs entirely in the
-browser, stores data in IndexedDB, and talks directly to OpenRouter from the
-client using an API key you provide in settings.
+The project is currently a deployed, local-first prototype. You can try the
+hosted app on GitHub Pages:
+
+```text
+https://romanlv.github.io/llm-slack/
+```
+
+It runs entirely in the browser, stores data in IndexedDB, and talks directly
+to OpenRouter from the client using an API key you provide in settings.
 
 The Slack-like interface is intentional: channels, sidebars, threads, pins, and
 saved items are already familiar to many people, so the app can introduce a new
@@ -33,7 +39,8 @@ organize when one conversation starts turning into several related decisions.
 
 ## Current Status
 
-This is an MVP/prototype, not a hosted production app.
+This is an MVP/prototype. It is deployed for public preview, but it is not a
+hosted production app with accounts, sync, or backend-held provider secrets.
 
 The big pieces already in place are:
 

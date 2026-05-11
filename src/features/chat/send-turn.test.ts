@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { archiveParentChat, createParentChat, db, getOrCreateThreadForMessage } from './repository'
 import { sendParentChatTurn, sendThreadTurn } from './send-turn'
 import { openrouterAdapter } from '@/features/providers/adapters/openrouter'
-import { upsertSingletonOpenRouter } from '@/features/providers/providers-repository'
+import { openaiCompatibleAdapter } from '@/features/providers/adapters/openai-compatible'
+import { createProvider } from '@/features/providers/providers-repository'
 import type { ModelRef } from '@/features/providers/model-ref'
 
 vi.mock('@/features/providers/adapters/openrouter', async (importActual) => {
@@ -17,7 +18,20 @@ vi.mock('@/features/providers/adapters/openrouter', async (importActual) => {
   }
 })
 
+vi.mock('@/features/providers/adapters/openai-compatible', async (importActual) => {
+  const actual =
+    await importActual<typeof import('@/features/providers/adapters/openai-compatible')>()
+  return {
+    ...actual,
+    openaiCompatibleAdapter: {
+      ...actual.openaiCompatibleAdapter,
+      streamChat: vi.fn(),
+    },
+  }
+})
+
 const mockedStreamChat = vi.mocked(openrouterAdapter.streamChat)
+const mockedOpenaiCompatStream = vi.mocked(openaiCompatibleAdapter.streamChat)
 
 const MODEL_A: ModelRef = {
   providerKind: 'openrouter',
@@ -25,11 +39,12 @@ const MODEL_A: ModelRef = {
 }
 
 async function seedOpenRouterProvider() {
-  await upsertSingletonOpenRouter({ apiKey: 'key' })
+  await createProvider({ kind: 'openrouter', label: 'OpenRouter', apiKey: 'key' })
 }
 
 beforeEach(async () => {
   mockedStreamChat.mockReset()
+  mockedOpenaiCompatStream.mockReset()
   await db.providers.clear()
   await db.modelOverrides.clear()
 })
@@ -111,5 +126,39 @@ describe('send turn lifecycle', () => {
       title: 'Explain testing',
       lastActivityPreview: 'Request failed: rate limited',
     })
+  })
+
+  it('rejects an openrouter send with /no API key set/ when the connection has no key', async () => {
+    const parentChat = await createParentChat({ title: 'No-key', model: MODEL_A })
+    await createProvider({ kind: 'openrouter', label: 'OpenRouter', apiKey: '' })
+
+    await expect(sendParentChatTurn(parentChat.id, 'hi')).rejects.toThrow(/no API key set/i)
+    expect(mockedStreamChat).not.toHaveBeenCalled()
+  })
+
+  it('routes a send to openai-compatible with empty apiKey + baseUrl + metadata.modelId', async () => {
+    mockedOpenaiCompatStream.mockResolvedValueOnce({ content: 'hello back', id: 'req-1' })
+    const parentChat = await createParentChat({
+      title: 'Local Ollama',
+      model: {
+        providerKind: 'openai-compatible',
+        providerModelId: 'llama3.1:70b',
+      },
+    })
+    await createProvider({
+      kind: 'openai-compatible',
+      label: 'Ollama',
+      apiKey: '',
+      baseUrl: 'http://localhost:11434/v1',
+      metadata: { modelId: 'llama3.1:70b' },
+    })
+
+    await sendParentChatTurn(parentChat.id, 'hi local')
+
+    expect(mockedOpenaiCompatStream).toHaveBeenCalled()
+    const args = mockedOpenaiCompatStream.mock.calls[0]
+    expect(args[0].apiKey).toBe('')
+    expect(args[0].baseUrl).toBe('http://localhost:11434/v1')
+    expect(args[1].providerModelId).toBe('llama3.1:70b')
   })
 })

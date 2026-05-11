@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Camera, ImageOff } from 'lucide-react'
@@ -37,10 +37,25 @@ export function ProfilePageContent() {
   const settings = useLiveQuery(() => getSettings(), [], DEFAULT_SETTINGS)
   const [savedMessage, setSavedMessage] = useState('')
   const [imageError, setImageError] = useState('')
+  const savedTimerRef = useRef<number | undefined>(undefined)
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current !== undefined) {
+        window.clearTimeout(savedTimerRef.current)
+      }
+    }
+  }, [])
 
   const showSaved = (message = 'Profile saved locally in IndexedDB.') => {
     setSavedMessage(message)
-    window.setTimeout(() => setSavedMessage(''), 2500)
+    if (savedTimerRef.current !== undefined) {
+      window.clearTimeout(savedTimerRef.current)
+    }
+    savedTimerRef.current = window.setTimeout(() => {
+      setSavedMessage('')
+      savedTimerRef.current = undefined
+    }, 2500)
   }
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {

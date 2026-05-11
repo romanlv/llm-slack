@@ -10,7 +10,7 @@ import type { ChatMessage, ParentChat } from '@/features/chat/domain'
 import { db } from '@/features/chat/repository'
 import { DEFAULT_SETTINGS } from '@/features/settings/settings-repository'
 
-import { AppShell } from './app-shell'
+import { ChatShell } from './chat-shell'
 
 const navigate = vi.fn()
 const location = { pathname: '/chat/parent-1' }
@@ -88,11 +88,11 @@ afterEach(() => {
   cleanup()
 })
 
-describe('AppShell chat actions', () => {
+describe('ChatShell chat actions', () => {
   it('links to the GitHub repository from the sidebar footer', async () => {
     await db.parentChats.add(parentChat({ id: 'parent-1', title: 'Planning' }))
 
-    render(<AppShell />)
+    render(<ChatShell />)
 
     const link = await screen.findByRole('link', { name: /github/i }, { timeout: 3000 })
     expect(link).toHaveAttribute('href', 'https://github.com/romanlv/llm-slack')
@@ -106,7 +106,7 @@ describe('AppShell chat actions', () => {
     ])
     await db.messages.add(message({}))
 
-    render(<AppShell />)
+    render(<ChatShell />)
 
     await userEvent.click(
       await screen.findByRole(
@@ -130,7 +130,7 @@ describe('AppShell chat actions', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false)
     await db.parentChats.add(parentChat({ id: 'parent-1', title: 'Planning' }))
 
-    render(<AppShell />)
+    render(<ChatShell />)
 
     await userEvent.click(
       await screen.findByRole(
@@ -153,7 +153,7 @@ describe('AppShell chat actions', () => {
       parentChat({ id: 'parent-other', title: 'Other chat', updatedAt: 3 }),
     ])
 
-    render(<AppShell />)
+    render(<ChatShell />)
 
     const starredHeading = await screen.findByText('Starred', undefined, { timeout: 3000 })
     const starredSection = starredHeading.closest('section')
@@ -174,7 +174,7 @@ describe('AppShell chat actions', () => {
     location.pathname = '/chat/parent-1'
     await db.parentChats.add(parentChat({ id: 'parent-1', title: 'Planning' }))
 
-    render(<AppShell />)
+    render(<ChatShell />)
 
     await userEvent.click(
       await screen.findByRole(
@@ -199,7 +199,7 @@ describe('AppShell chat actions', () => {
       parentChat({ id: 'parent-2', title: 'Other', updatedAt: 1 }),
     ])
 
-    render(<AppShell />)
+    render(<ChatShell />)
 
     await userEvent.click(
       await screen.findByRole(

@@ -1,4 +1,5 @@
 import { db } from '@/features/chat/database'
+import { abortAllStreams } from '@/features/chat/stream-controllers'
 import type { ProviderConnection } from '@/features/providers/entities'
 import type { ModelRef, ProviderKind } from '@/features/providers/model-ref'
 import { getAdapter } from '@/features/providers/registry'
@@ -22,61 +23,102 @@ export async function getFirstProviderOfKind(kind: ProviderKind) {
 
 export interface ProviderInput {
   kind: ProviderKind
-  label: string
+  // Optional. When omitted or empty, falls back to the kind's default name
+  // and auto-suffixes " (2)", " (3)" etc. when a connection with that label
+  // already exists. When non-empty, treated as an explicit user choice and
+  // throws DuplicateLabelError on collision so the UI can surface the error.
+  label?: string
   apiKey: string
   baseUrl?: string
   metadata?: Record<string, string>
 }
 
-export async function createProvider(input: ProviderInput) {
-  const now = Date.now()
-  const provider: ProviderConnection = {
-    id: crypto.randomUUID(),
-    kind: input.kind,
-    label: input.label.trim() || defaultLabelForKind(input.kind),
-    apiKey: input.apiKey,
-    baseUrl: input.baseUrl?.trim() || undefined,
-    metadata: input.metadata ?? {},
-    createdAt: now,
-    updatedAt: now,
+export class DuplicateLabelError extends Error {
+  constructor(label: string) {
+    super(`A provider connection named "${label}" already exists.`)
+    this.name = 'DuplicateLabelError'
+  }
+}
+
+// Resolves the final label inside a Dexie rw transaction. Reading the
+// existing rows and inserting the new one in the same transaction prevents
+// two concurrent createProvider calls from both computing "OpenAI (2)" and
+// both succeeding — Dexie serializes rw transactions on the same table.
+async function resolveLabelInTx(
+  desired: string | undefined,
+  kind: ProviderKind,
+  excludeId?: string,
+): Promise<string> {
+  const trimmed = desired?.trim() ?? ''
+  const explicit = trimmed.length > 0
+  const all = await db.providers.toArray()
+  const used = new Set(
+    all.filter((p) => p.id !== excludeId).map((p) => p.label),
+  )
+
+  if (explicit) {
+    if (used.has(trimmed)) throw new DuplicateLabelError(trimmed)
+    return trimmed
   }
 
-  await db.providers.add(provider)
-  return provider
+  const base = defaultLabelForKind(kind)
+  if (!used.has(base)) return base
+  for (let n = 2; n < 10_000; n += 1) {
+    const candidate = `${base} (${n})`
+    if (!used.has(candidate)) return candidate
+  }
+  // Defensive ceiling: a user with 10k connections of the same kind is
+  // already in trouble; fail loud rather than spin forever.
+  throw new Error(`Could not allocate a unique label for kind "${kind}".`)
+}
+
+function normalizeBaseUrl(value: string | undefined) {
+  return value?.trim().replace(/\/+$/, '') || undefined
+}
+
+export async function createProvider(input: ProviderInput) {
+  return db.transaction('rw', db.providers, async () => {
+    const label = await resolveLabelInTx(input.label, input.kind)
+    const now = Date.now()
+    const provider: ProviderConnection = {
+      id: crypto.randomUUID(),
+      kind: input.kind,
+      label,
+      apiKey: input.apiKey,
+      baseUrl: normalizeBaseUrl(input.baseUrl),
+      metadata: input.metadata ?? {},
+      createdAt: now,
+      updatedAt: now,
+    }
+    await db.providers.add(provider)
+    return provider
+  })
 }
 
 export async function updateProvider(id: string, updates: Partial<ProviderInput>) {
-  const patch: Partial<ProviderConnection> = { updatedAt: Date.now() }
-  if (updates.kind !== undefined) patch.kind = updates.kind
-  if (updates.label !== undefined) patch.label = updates.label.trim() || defaultLabelForKind(updates.kind ?? 'openrouter')
-  if (updates.apiKey !== undefined) patch.apiKey = updates.apiKey
-  if (updates.baseUrl !== undefined) patch.baseUrl = updates.baseUrl.trim() || undefined
-  if (updates.metadata !== undefined) patch.metadata = updates.metadata
-  await db.providers.update(id, patch)
-  return db.providers.get(id)
-}
-
-// Upsert the seeded "first OpenRouter" provider used by the existing settings
-// UI before the multi-provider redesign lands. Idempotent and keyed by kind +
-// label so a user accidentally clicking save twice doesn't grow the list.
-export async function upsertSingletonOpenRouter(input: {
-  apiKey: string
-  metadata?: Record<string, string>
-}): Promise<ProviderConnection> {
-  const existing = await getFirstProviderOfKind('openrouter')
-  if (existing) {
-    const updated = await updateProvider(existing.id, {
-      apiKey: input.apiKey,
-      metadata: input.metadata ?? existing.metadata,
-    })
-    return updated ?? existing
-  }
-
-  return createProvider({
-    kind: 'openrouter',
-    label: 'OpenRouter',
-    apiKey: input.apiKey,
-    metadata: input.metadata,
+  return db.transaction('rw', db.providers, async () => {
+    const existing = await db.providers.get(id)
+    if (!existing) {
+      throw new Error(`Cannot update provider: id ${id} not found`)
+    }
+    const patch: Partial<ProviderConnection> = { updatedAt: Date.now() }
+    if (updates.kind !== undefined) patch.kind = updates.kind
+    if (updates.label !== undefined) {
+      patch.label = await resolveLabelInTx(
+        updates.label,
+        updates.kind ?? existing.kind,
+        id,
+      )
+    }
+    if (updates.apiKey !== undefined) patch.apiKey = updates.apiKey
+    if (updates.baseUrl !== undefined) patch.baseUrl = normalizeBaseUrl(updates.baseUrl)
+    if (updates.metadata !== undefined) {
+      // Merge with existing metadata so callers can patch one field (e.g.
+      // siteUrl) without dropping the rest of the bag.
+      patch.metadata = { ...(existing.metadata ?? {}), ...updates.metadata }
+    }
+    await db.providers.update(id, patch)
+    return db.providers.get(id)
   })
 }
 
@@ -87,6 +129,11 @@ export async function upsertSingletonOpenRouter(input: {
 // also serves the same providerModelId; otherwise it is set to null so the
 // UI can prompt for a new default.
 export async function deleteProvider(id: string) {
+  // Aborting before the cascade prevents in-flight streams from racing the
+  // delete (e.g. writing usage rows or snapshot updates against the
+  // provider being removed). Streams keyed elsewhere are safe to abort —
+  // their consumers can re-send.
+  abortAllStreams()
   await db.transaction(
     'rw',
     [

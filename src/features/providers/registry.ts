@@ -13,9 +13,12 @@ const REGISTRY: Record<ProviderKind, ProviderAdapter> = {
 }
 
 export function getAdapter(kind: ProviderKind): ProviderAdapter {
-  return REGISTRY[kind]
+  const adapter = REGISTRY[kind]
+  if (!adapter) {
+    throw new Error(
+      `No provider adapter registered for kind "${kind}". Check src/features/providers/registry.ts.`,
+    )
+  }
+  return adapter
 }
 
-export function allAdapters(): ProviderAdapter[] {
-  return Object.values(REGISTRY)
-}

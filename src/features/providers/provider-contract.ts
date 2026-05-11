@@ -27,6 +27,11 @@ export interface StreamChatInput {
   messages: ChatProviderMessage[]
   onChunk: (chunk: string) => void
   onMessageId?: (id: string) => void
+  // Caller-provided cancellation signal. Adapters forward it into the
+  // underlying fetch and abort the body reader when it fires. If absent,
+  // adapters apply an internal connect-timeout AbortController so a hung
+  // provider doesn't pin a connection forever.
+  signal?: AbortSignal
 }
 
 export interface StreamChatResult {
@@ -41,6 +46,11 @@ export interface CatalogEntry extends ModelMetadata {
 
 export interface ProviderAdapter {
   kind: ProviderKind
+  // Whether streamChat requires a non-empty apiKey on the ProviderConnection.
+  // Hosted adapters (OpenAI/Anthropic/OpenRouter) set true. Local-endpoint
+  // adapters that may run unauthenticated (OpenAI-compatible against Ollama,
+  // llama.cpp) set false. send-turn enforces this before dispatching.
+  requiresApiKey: boolean
   bundledCatalog(): CatalogEntry[]
   streamChat(
     connection: ProviderConnection,

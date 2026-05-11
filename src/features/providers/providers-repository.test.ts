@@ -4,7 +4,8 @@ import { db } from '@/features/chat/database'
 import {
   createProvider,
   deleteProvider,
-  upsertSingletonOpenRouter,
+  DuplicateLabelError,
+  updateProvider,
 } from '@/features/providers/providers-repository'
 import { upsertOverride } from '@/features/providers/model-overrides-repository'
 import { saveSettings } from '@/features/settings/settings-repository'
@@ -93,7 +94,7 @@ describe('providers repository cascade delete', () => {
   })
 
   it('nulls settings.defaultModel when no same-kind connection remains', async () => {
-    const only = await upsertSingletonOpenRouter({ apiKey: 'k' })
+    const only = await createProvider({ kind: 'openrouter', label: 'OpenRouter', apiKey: 'k' })
     await saveSettings({
       defaultModel: {
         providerId: only.id,
@@ -106,5 +107,43 @@ describe('providers repository cascade delete', () => {
 
     const settings = await db.settings.get('app')
     expect(settings?.defaultModel).toBeNull()
+  })
+})
+
+describe('connection label uniqueness', () => {
+  it('auto-suffixes the default label when adding a second connection of the same kind', async () => {
+    const first = await createProvider({ kind: 'openai', apiKey: 'k1' })
+    const second = await createProvider({ kind: 'openai', apiKey: 'k2' })
+    const third = await createProvider({ kind: 'openai', apiKey: 'k3' })
+    expect(first.label).toBe('OpenAI')
+    expect(second.label).toBe('OpenAI (2)')
+    expect(third.label).toBe('OpenAI (3)')
+  })
+
+  it('throws DuplicateLabelError when the user supplies a label that collides', async () => {
+    await createProvider({ kind: 'openai', label: 'Work', apiKey: 'k1' })
+    await expect(
+      createProvider({ kind: 'openai', label: 'Work', apiKey: 'k2' }),
+    ).rejects.toBeInstanceOf(DuplicateLabelError)
+  })
+
+  it('lets a connection keep its own label when updateProvider passes the same label back', async () => {
+    const conn = await createProvider({ kind: 'openai', label: 'Work', apiKey: 'k1' })
+    const updated = await updateProvider(conn.id, { label: 'Work' })
+    expect(updated?.label).toBe('Work')
+  })
+
+  it('serializes concurrent creates so two parallel callers get distinct labels', async () => {
+    // Without the rw transaction, both calls would read an empty providers
+    // table and both produce label "OpenAI". The transaction forces one to
+    // wait until the other commits.
+    const [first, second] = await Promise.all([
+      createProvider({ kind: 'openai', apiKey: 'k1' }),
+      createProvider({ kind: 'openai', apiKey: 'k2' }),
+    ])
+    const labels = new Set([first.label, second.label])
+    expect(labels.size).toBe(2)
+    expect(labels.has('OpenAI')).toBe(true)
+    expect(labels.has('OpenAI (2)')).toBe(true)
   })
 })

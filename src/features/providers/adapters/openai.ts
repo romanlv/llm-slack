@@ -1,17 +1,19 @@
-import type { ProviderAdapter, CatalogEntry } from '@/features/providers/provider-contract'
+import type { CatalogEntry } from '@/features/providers/provider-contract'
+
+import { createOpenAIChatCompletionsAdapter } from './openai-chat-completions'
 
 const BUNDLED: CatalogEntry[] = [
-  { providerModelId: 'gpt-4o', name: 'GPT-4o', contextLength: 128_000 },
-  { providerModelId: 'gpt-4o-mini', name: 'GPT-4o mini', contextLength: 128_000 },
-  { providerModelId: 'o1-mini', name: 'o1-mini', contextLength: 128_000 },
+  { providerModelId: 'gpt-5.5-pro', name: 'GPT-5.5 Pro', contextLength: 1_000_000 },
+  { providerModelId: 'gpt-5.5', name: 'GPT-5.5', contextLength: 1_000_000 },
+  { providerModelId: 'gpt-5.4', name: 'GPT-5.4', contextLength: 1_000_000 },
+  { providerModelId: 'gpt-5.4-mini', name: 'GPT-5.4 mini', contextLength: 400_000 },
+  { providerModelId: 'gpt-5.4-nano', name: 'GPT-5.4 nano', contextLength: 400_000 },
 ]
 
-export const openaiAdapter: ProviderAdapter = {
+export const openaiAdapter = createOpenAIChatCompletionsAdapter({
   kind: 'openai',
-  bundledCatalog: () => BUNDLED,
-  streamChat: async () => {
-    throw new Error(
-      'OpenAI direct provider is not wired up yet. Use OpenRouter for now.',
-    )
-  },
-}
+  defaultBaseUrl: 'https://api.openai.com/v1',
+  bundled: BUNDLED,
+  usageTag: 'openai',
+  requiresApiKey: true,
+})

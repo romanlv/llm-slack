@@ -5,7 +5,6 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import {
   Bookmark,
-  ChevronDown,
   Copy,
   GitBranch,
   GitFork,
@@ -50,9 +49,21 @@ import {
   type ProviderUsage,
   type ThreadAncestor,
 } from '@/features/chat/repository'
-import { OPENROUTER_TRENDING_MODELS } from '@/features/providers/openrouter-models'
+import {
+  type EffectiveModel,
+  listEnabledModels,
+} from '@/features/providers/models-catalog'
+import type { ProviderConnection } from '@/features/providers/entities'
 import type { ModelRef } from '@/features/providers/model-ref'
-import { getFirstProviderOfKind } from '@/features/providers/providers-repository'
+import { listProviders } from '@/features/providers/providers-repository'
+import { getAdapter } from '@/features/providers/registry'
+
+import { MiniModelSelect } from './model-picker'
+import {
+  buildPickerValue,
+  pickerValueFromRef,
+  refFromPickerString,
+} from './model-picker-helpers'
 import {
   DEFAULT_USER_NAME,
   getSettings,
@@ -83,12 +94,17 @@ function modelShortName(model?: ModelRef | null) {
   }
 
   const id = model.providerModelId
-  const known = OPENROUTER_TRENDING_MODELS.find((item) => item.id === id)
-  if (known) {
-    return known.label
-      .replace(/^Claude\s+/i, '')
-      .replace(/^OpenAI\s+/i, '')
-      .replace(/^Google\s+/i, '')
+  try {
+    const adapter = getAdapter(model.providerKind)
+    const known = adapter.bundledCatalog().find((entry) => entry.providerModelId === id)
+    if (known) {
+      return known.name
+        .replace(/^Claude\s+/i, '')
+        .replace(/^OpenAI\s+/i, '')
+        .replace(/^Google\s+/i, '')
+    }
+  } catch {
+    // Unknown provider kind — fall through to id-derived label.
   }
 
   return id.split('/').at(-1)?.replace(/claude-/i, '') ?? id
@@ -607,37 +623,6 @@ function MessageBlock({
   )
 }
 
-function MiniModelSelect({
-  disabled,
-  onChange,
-  value,
-}: {
-  disabled?: boolean
-  onChange: (value: string) => void
-  value: string
-}) {
-  const inKnownList = OPENROUTER_TRENDING_MODELS.some((model) => model.id === value)
-
-  return (
-    <label className="inline-flex h-[22px] min-w-0 max-w-full items-center gap-1 rounded-xs border border-line bg-surface-muted px-1.5 font-mono text-meta text-ink">
-      <span className="leading-none text-accent">●</span>
-      <select
-        className="min-w-0 max-w-32 bg-transparent text-ink outline-none disabled:opacity-60"
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-        value={value}
-      >
-        {OPENROUTER_TRENDING_MODELS.map((model) => (
-          <option key={model.id} value={model.id}>
-            {shortNameForModelId(model.id)}
-          </option>
-        ))}
-        {!inKnownList ? <option value={value}>{shortNameForModelId(value)}</option> : null}
-      </select>
-      <ChevronDown className="size-2.5 text-ink-dim" />
-    </label>
-  )
-}
 
 function ContextMeter({ compact, usage }: { compact?: boolean; usage?: ProviderUsage }) {
   const usedTokens = tokenCount(usage)
@@ -690,7 +675,9 @@ function ContextMeter({ compact, usage }: { compact?: boolean; usage?: ProviderU
 }
 
 function ConversationComposer({
+  availableModels,
   className,
+  connections,
   disabled,
   model,
   onChange,
@@ -702,7 +689,9 @@ function ConversationComposer({
   usage,
   value,
 }: {
+  availableModels: EffectiveModel[]
   className?: string
+  connections: ProviderConnection[]
   disabled?: boolean
   model: string
   onChange: (value: string) => void
@@ -753,7 +742,14 @@ function ConversationComposer({
           />
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-line px-1.5 py-1 pl-2">
-          <MiniModelSelect disabled={disabled} onChange={onModelChange} value={model} />
+          <MiniModelSelect
+            availableModels={availableModels}
+            connections={connections}
+            disabled={disabled}
+            fallbackLabel={(id) => shortNameForModelId(id) ?? id}
+            onChange={onModelChange}
+            value={model}
+          />
           <ContextMeter compact={tone === 'thread'} usage={usage} />
           {/* TODO: reply-in-thread composer mode toggle — see docs/tasks.md (planned)
           {tone === 'parent' ? (
@@ -1174,27 +1170,52 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
   )
   const parentScrollContentKeyForActiveTab =
     parentTab === 'pinned' ? parentPinnedScrollContentKey : parentScrollContentKey
-  const openRouterProvider = useLiveQuery(
-    () => getFirstProviderOfKind('openrouter'),
+  const providers = useLiveQuery(() => listProviders(), [], [])
+  const availableModels = useLiveQuery(
+    () => listEnabledModels(),
     [],
-    undefined,
+    [] as EffectiveModel[],
   )
-  const hasProviderKey = Boolean(openRouterProvider?.apiKey?.trim())
-  const settingsDefaultModelId = settings?.defaultModel?.providerModelId
-
-  function modelIdFromRef(ref: ModelRef | null | undefined) {
-    return ref?.providerModelId ?? settingsDefaultModelId ?? ''
-  }
-
-  function refFromPickerString(value: string): ModelRef | null {
-    const trimmed = value.trim()
-    if (!trimmed) return null
-    return {
-      providerId: openRouterProvider?.id,
-      providerKind: 'openrouter',
-      providerModelId: trimmed,
+  // A provider is "usable" when send-turn would accept it: either the
+  // adapter doesn't require a key (Ollama-style local endpoints), or one is
+  // saved on the connection. Otherwise we show the connect-a-provider
+  // banner. Keep this aligned with the equivalent check in send-turn.ts.
+  const hasUsableProvider = providers.some((provider) => {
+    try {
+      const adapter = getAdapter(provider.kind)
+      return !adapter.requiresApiKey || Boolean(provider.apiKey?.trim())
+    } catch {
+      return false
     }
-  }
+  })
+  const settingsDefaultModelId = settings?.defaultModel?.providerModelId
+  const settingsDefaultIsAvailable =
+    settingsDefaultModelId !== undefined &&
+    availableModels.some(
+      (model) => model.providerModelId === settingsDefaultModelId,
+    )
+  const fallbackPickerValue = (() => {
+    if (settingsDefaultIsAvailable && settings?.defaultModel) {
+      const settingsDefault = settings.defaultModel
+      const match = availableModels.find(
+        (model) =>
+          model.providerModelId === settingsDefault.providerModelId &&
+          (!settingsDefault.providerId || model.providerId === settingsDefault.providerId),
+      )
+      if (match) return buildPickerValue(match.providerId, match.providerModelId)
+    }
+    const first = availableModels[0]
+    return first ? buildPickerValue(first.providerId, first.providerModelId) : ''
+  })()
+
+  const refToPickerValue = (ref: ModelRef | null | undefined) =>
+    pickerValueFromRef(ref, { availableModels, fallbackPickerValue })
+
+  const pickerValueToRef = (value: string) =>
+    refFromPickerString(value, {
+      availableModels,
+      settingsDefault: settings?.defaultModel,
+    })
 
   function jumpToMessage(messageId: string) {
     const element = document.getElementById(messageElementId(messageId))
@@ -1450,20 +1471,22 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
         </SmartMessageScrollPane>
 
         <div className="row-start-4">
-          {hasProviderKey ? null : <ProviderConnectBanner />}
+          {hasUsableProvider ? null : <ProviderConnectBanner />}
           <ConversationComposer
+            availableModels={availableModels}
+            connections={providers}
             disabled={
               sendingParent ||
               Boolean(parentChat.archivedAt)
             }
-            model={modelIdFromRef(parentChat.model)}
+            model={refToPickerValue(parentChat.model)}
             onChange={(value) => void saveParentDraft(parentChat.id, value)}
             onModelChange={(model) =>
-              void setParentChatModel(parentChat.id, refFromPickerString(model))
+              void setParentChatModel(parentChat.id, pickerValueToRef(model))
             }
             onSubmit={handleParentSubmit}
             placeholder="Ask anything, or /branch to fork this convo..."
-            submitDisabled={!hasProviderKey}
+            submitDisabled={!hasUsableProvider}
             tone="parent"
             usage={parentUsage}
             value={parentChat.draft}
@@ -1565,25 +1588,27 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
           </SmartMessageScrollPane>
 
           <div>
-            {hasProviderKey ? null : <ProviderConnectBanner />}
+            {hasUsableProvider ? null : <ProviderConnectBanner />}
             <ConversationComposer
+              availableModels={availableModels}
+              connections={providers}
               disabled={
                 !activeThread ||
                 sendingThreadId === activeThread.id ||
                 Boolean(parentChat.archivedAt)
               }
-              model={modelIdFromRef(activeThread?.model ?? parentChat.model)}
+              model={refToPickerValue(activeThread?.model ?? parentChat.model)}
               onChange={(value) =>
                 activeThread ? void saveThreadDraft(activeThread.id, value) : undefined
               }
               onModelChange={(model) =>
                 activeThread
-                  ? void setThreadModel(activeThread.id, refFromPickerString(model))
+                  ? void setThreadModel(activeThread.id, pickerValueToRef(model))
                   : undefined
               }
               onSubmit={handleThreadSubmit}
               placeholder="Continue this branch, or /branch to fork again..."
-              submitDisabled={!hasProviderKey}
+              submitDisabled={!hasUsableProvider}
               tone="thread"
               usage={threadUsage}
               value={activeThread?.draft ?? ''}

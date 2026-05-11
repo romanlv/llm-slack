@@ -15,7 +15,8 @@
 - [x] subtle pill-shaped active selection in sidebar
 - [ ] retry failed assistant message
 - [ ] claude code oauth token provider
-- [ ] codex oauth token provider
+- [x] codex oauth token provider
+- [ ] Openrouter - selecting models
 - [ ] free models from open router
 - [ ] paste images / upload files to chat
 - [ ] out of credits state
@@ -35,3 +36,5 @@
 - [ ] search
 - [ ] projects?  workspaces are projects
 - [ ] export chats
+- [ ] show pricing per chat
+- [ ] anthropic proxy: thin pass-through (Cloudflare Worker / Vercel function) so direct-browser Claude calls work without the org-level CORS opt-in, and so OAuth tokens (`sk-ant-oat…`) can be used at all. Once shipped, drop the CORS step from the Anthropic auth method in `src/features/settings/provider-definitions.ts` and re-add the OAuth `authMethods` entry.

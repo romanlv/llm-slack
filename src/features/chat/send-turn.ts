@@ -13,12 +13,26 @@ import {
   syncRootReplyCountForThread,
   updateMessage,
 } from '@/features/chat/repository'
+import {
+  abortAllStreams,
+  abortStreamsForConversation,
+  clearStreamController,
+  registerStreamController,
+} from '@/features/chat/stream-controllers'
 import type { ModelRef } from '@/features/providers/model-ref'
 import { resolveForSend, type ResolveForSendResult } from '@/features/providers/models-catalog'
 import { getAdapter } from '@/features/providers/registry'
 import { getSettings } from '@/features/settings/settings-repository'
 
 const APPROX_CONTEXT_CHAR_LIMIT = 48_000
+
+export { abortAllStreams, abortStreamsForConversation }
+
+function isAbortError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'AbortError') return true
+  if (error instanceof Error && error.name === 'AbortError') return true
+  return false
+}
 
 function normalizeErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -41,7 +55,8 @@ async function resolveSendTarget(modelRef: ModelRef | null): Promise<ResolveForS
     )
   }
 
-  if (!resolved.connection.apiKey.trim()) {
+  const adapter = getAdapter(resolved.connection.kind)
+  if (adapter.requiresApiKey && !resolved.connection.apiKey.trim()) {
     throw new Error(
       `Provider "${resolved.connection.label}" has no API key set. Update it in Settings before sending.`,
     )
@@ -84,6 +99,7 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
     model: snapshot,
   })
 
+  const controller = registerStreamController(parentChatId)
   try {
     const conversation = await getParentConversation(parentChatId)
     if (estimateContextSize(conversation) > APPROX_CONTEXT_CHAR_LIMIT) {
@@ -95,17 +111,27 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
     let assistantContent = ''
     const adapter = getAdapter(resolved.connection.kind)
 
+    const onUnawaitedWriteError = (err: unknown) => {
+      // Surface QuotaExceededError (or any persistence failure) by aborting
+      // the stream — the AbortError path below converts it to a failed message
+      // status rather than leaving it stuck in 'streaming'.
+      if (!controller.signal.aborted) controller.abort(err)
+    }
+
     const response = await adapter.streamChat(resolved.connection, snapshot, {
       messages: conversation,
+      signal: controller.signal,
       onChunk: (chunk) => {
         assistantContent += chunk
-        void updateMessage(assistantMessage.id, {
+        updateMessage(assistantMessage.id, {
           content: assistantContent,
           status: 'streaming',
-        })
+        }).catch(onUnawaitedWriteError)
       },
       onMessageId: (id) => {
-        void updateMessage(assistantMessage.id, { providerRequestId: id })
+        updateMessage(assistantMessage.id, { providerRequestId: id }).catch(
+          onUnawaitedWriteError,
+        )
       },
     })
 
@@ -116,10 +142,17 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
     }
     await finalizeParentChatAfterSend(parentChatId, trimmed, finalContent)
   } catch (error) {
+    if (isAbortError(error) || controller.signal.aborted) {
+      await failMessage(assistantMessage.id, 'Request cancelled.', 'Cancelled')
+      await finalizeParentChatAfterSend(parentChatId, trimmed, 'Request cancelled.')
+      return
+    }
     const message = normalizeErrorMessage(error)
     await failMessage(assistantMessage.id, `Request failed: ${message}`, message)
     await finalizeParentChatAfterSend(parentChatId, trimmed, `Request failed: ${message}`)
     throw new Error(message)
+  } finally {
+    clearStreamController(parentChatId, controller)
   }
 }
 
@@ -165,6 +198,7 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
 
   await syncRootReplyCountForThread(threadId)
 
+  const controller = registerStreamController(threadId)
   try {
     const conversation = await getThreadConversation(threadId)
     if (estimateContextSize(conversation) > APPROX_CONTEXT_CHAR_LIMIT) {
@@ -176,17 +210,24 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     let assistantContent = ''
     const adapter = getAdapter(resolved.connection.kind)
 
+    const onUnawaitedWriteError = (err: unknown) => {
+      if (!controller.signal.aborted) controller.abort(err)
+    }
+
     const response = await adapter.streamChat(resolved.connection, snapshot, {
       messages: conversation,
+      signal: controller.signal,
       onChunk: (chunk) => {
         assistantContent += chunk
-        void updateMessage(assistantMessage.id, {
+        updateMessage(assistantMessage.id, {
           content: assistantContent,
           status: 'streaming',
-        })
+        }).catch(onUnawaitedWriteError)
       },
       onMessageId: (id) => {
-        void updateMessage(assistantMessage.id, { providerRequestId: id })
+        updateMessage(assistantMessage.id, { providerRequestId: id }).catch(
+          onUnawaitedWriteError,
+        )
       },
     })
 
@@ -197,6 +238,11 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     }
     await finalizeThreadAfterSend(threadId, thread.parentChatId, trimmed, finalContent)
   } catch (error) {
+    if (isAbortError(error) || controller.signal.aborted) {
+      await failMessage(assistantMessage.id, 'Request cancelled.', 'Cancelled')
+      await finalizeThreadAfterSend(threadId, thread.parentChatId, trimmed, 'Request cancelled.')
+      return
+    }
     const message = normalizeErrorMessage(error)
     await failMessage(assistantMessage.id, `Request failed: ${message}`, message)
     await finalizeThreadAfterSend(
@@ -206,5 +252,7 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
       `Request failed: ${message}`,
     )
     throw new Error(message)
+  } finally {
+    clearStreamController(threadId, controller)
   }
 }

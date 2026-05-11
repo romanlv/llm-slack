@@ -1,6 +1,6 @@
 import { db } from '@/features/chat/database'
 import type { ModelMetadata, ModelOverride, ProviderConnection } from '@/features/providers/entities'
-import type { ModelRef, ProviderKind } from '@/features/providers/model-ref'
+import { modelRefsEqual, type ModelRef, type ProviderKind } from '@/features/providers/model-ref'
 import { getAdapter } from '@/features/providers/registry'
 
 export interface EffectiveModel extends ModelMetadata {
@@ -65,6 +65,9 @@ function buildEffective(
   for (const override of overrides) {
     if (seen.has(override.providerModelId)) continue
     if (!override.customMetadata) continue
+    // Mark as seen so the synthesized-from-metadata block below doesn't
+    // produce a second entry for the same providerModelId.
+    seen.add(override.providerModelId)
     result.push({
       providerId: provider.id,
       providerKind: provider.kind,
@@ -78,6 +81,31 @@ function buildEffective(
       pricing: override.customMetadata.pricing,
       modalities: override.customMetadata.modalities,
     })
+  }
+
+  // Single-model definitions (today: openai-compatible) store the user-typed
+  // model id on the connection metadata and synthesize one virtual catalog
+  // entry per connection. Overrides above already win — `seen` guards us
+  // from producing a duplicate when the user customizes the same model id.
+  const metadataModelId = provider.metadata?.modelId?.trim()
+  if (metadataModelId && !seen.has(metadataModelId)) {
+    const hideOverride = overrides.find(
+      (o) =>
+        o.providerModelId === metadataModelId &&
+        o.customMetadata === undefined &&
+        o.enabled === false,
+    )
+    if (!hideOverride) {
+      result.push({
+        providerId: provider.id,
+        providerKind: provider.kind,
+        providerModelId: metadataModelId,
+        enabled: true,
+        isBundled: false,
+        isCustom: true,
+        name: `${provider.label} model`,
+      })
+    }
   }
 
   return result
@@ -164,10 +192,24 @@ export async function resolveForSend(
         provider,
         overrides.filter((o) => o.providerId === provider.id),
       )
-      const model =
-        effective.find((entry) => entry.providerModelId === candidate.providerModelId) ??
-        synthEffective(provider, candidate)
-      return { connection: provider, model, substituted: false }
+      const matched = effective.find(
+        (entry) => entry.providerModelId === candidate.providerModelId,
+      )
+      if (matched) {
+        return { connection: provider, model: matched, substituted: false }
+      }
+      // Fall through to same-kind matching when the snapshotted providerId
+      // is the right provider but the model has been explicitly hidden on
+      // it — another same-kind connection may still serve it.
+      if (isExplicitlyHidden(provider.id, candidate.providerModelId)) {
+        // intentional fall-through to same-kind search
+      } else {
+        return {
+          connection: provider,
+          model: synthEffective(provider, candidate),
+          substituted: false,
+        }
+      }
     }
 
     // Same-kind fallback: prefer settings.defaultModel.providerId when it's
@@ -226,10 +268,3 @@ export async function resolveForSend(
   return null
 }
 
-function modelRefsEqual(a: ModelRef, b: ModelRef) {
-  return (
-    a.providerKind === b.providerKind &&
-    a.providerModelId === b.providerModelId &&
-    (a.providerId ?? null) === (b.providerId ?? null)
-  )
-}

@@ -70,6 +70,72 @@ describe('buildEffective merge', () => {
     const entry = effective.find((m) => m.providerModelId === 'long/tail-model')
     expect(entry).toMatchObject({ name: 'Long tail', isBundled: false, isCustom: true })
   })
+
+  it('lets a custom override win over the synthesized metadata.modelId entry without producing a duplicate', async () => {
+    const connection = await createProvider({
+      kind: 'openai-compatible',
+      label: 'Ollama (laptop)',
+      apiKey: '',
+      baseUrl: 'http://localhost:11434/v1',
+      metadata: { modelId: 'llama3.1:70b' },
+    })
+    await upsertOverride(
+      {
+        providerId: connection.id,
+        providerModelId: 'llama3.1:70b',
+        enabled: true,
+        customMetadata: { name: 'My fine-tuned llama' },
+      },
+      { isBundled: false },
+    )
+
+    const effective = await listEffectiveForProvider(connection.id)
+    const matches = effective.filter((m) => m.providerModelId === 'llama3.1:70b')
+    expect(matches).toHaveLength(1)
+    expect(matches[0].name).toBe('My fine-tuned llama')
+  })
+
+  it('hides the synthesized metadata.modelId entry when an explicit-hide override exists', async () => {
+    const connection = await createProvider({
+      kind: 'openai-compatible',
+      label: 'Ollama (laptop)',
+      apiKey: '',
+      baseUrl: 'http://localhost:11434/v1',
+      metadata: { modelId: 'llama3.1:70b' },
+    })
+    await upsertOverride(
+      {
+        providerId: connection.id,
+        providerModelId: 'llama3.1:70b',
+        enabled: false,
+      },
+      { isBundled: false },
+    )
+
+    const effective = await listEffectiveForProvider(connection.id)
+    expect(effective.find((m) => m.providerModelId === 'llama3.1:70b')).toBeUndefined()
+  })
+
+  it('synthesizes a single virtual model for a connection whose metadata.modelId is set', async () => {
+    const connection = await createProvider({
+      kind: 'openai-compatible',
+      label: 'Ollama (laptop)',
+      apiKey: '',
+      baseUrl: 'http://localhost:11434/v1',
+      metadata: { modelId: 'llama3.1:70b' },
+    })
+
+    const effective = await listEffectiveForProvider(connection.id)
+    expect(effective).toHaveLength(1)
+    expect(effective[0]).toMatchObject({
+      providerId: connection.id,
+      providerKind: 'openai-compatible',
+      providerModelId: 'llama3.1:70b',
+      name: 'Ollama (laptop) model',
+      isCustom: true,
+      enabled: true,
+    })
+  })
 })
 
 describe('resolveForSend fallback chain', () => {
