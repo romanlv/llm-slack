@@ -240,6 +240,38 @@ describe('send turn lifecycle', () => {
     expect(mockedStreamChat).not.toHaveBeenCalled()
   })
 
+  it('records a turn + attempt for a successful model-DM send and closes with stopReason=complete', async () => {
+    mockedStreamChat.mockResolvedValueOnce({ content: 'ok', id: 'req' })
+    const parentChat = await createParentChat({ title: 'lifecycle', model: MODEL_A })
+    await seedOpenRouterProvider()
+
+    await sendParentChatTurn(parentChat.id, 'hi')
+
+    const turns = await db.turns.toArray()
+    expect(turns).toHaveLength(1)
+    expect(turns[0].status).toBe('closed')
+    expect(turns[0].stopReason).toBe('complete')
+
+    const attempts = await db.providerRequestAttempts.toArray()
+    expect(attempts).toHaveLength(1)
+    expect(attempts[0].status).toBe('complete')
+    expect(attempts[0].attemptNumber).toBe(1)
+  })
+
+  it('records turn.stopReason=error when the provider errors', async () => {
+    mockedStreamChat.mockRejectedValueOnce(new Error('boom'))
+    const parentChat = await createParentChat({ title: 'err', model: MODEL_A })
+    await seedOpenRouterProvider()
+
+    await expect(sendParentChatTurn(parentChat.id, 'hi')).rejects.toThrow('boom')
+
+    const turns = await db.turns.toArray()
+    expect(turns[0].stopReason).toBe('error')
+    const attempts = await db.providerRequestAttempts.toArray()
+    expect(attempts[0].status).toBe('error')
+    expect(attempts[0].errorCode).toBe('boom')
+  })
+
   it('routes a send to openai-compatible with empty apiKey + baseUrl + metadata.modelId', async () => {
     mockedOpenaiCompatStream.mockResolvedValueOnce({ content: 'hello back', id: 'req-1' })
     const parentChat = await createParentChat({

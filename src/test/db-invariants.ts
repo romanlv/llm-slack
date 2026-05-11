@@ -195,8 +195,40 @@ export async function assertDbInvariants(db: LlmSlackDatabase): Promise<void> {
     }
   }
 
+  // U6 invariants — turns + providerRequestAttempts.
+  const turns = await db.turns.toArray()
+  const turnIds = new Set(turns.map((t) => t.id))
+  for (const turn of turns) {
+    if (turn.status === 'closed' && !turn.stopReason) {
+      failures.push({
+        rule: 'closed turn has a stopReason',
+        detail: `turn "${turn.id}" is closed without a stopReason`,
+      })
+    }
+    if (!parentChatIds.has(turn.parentChatId)) {
+      failures.push({
+        rule: 'turn.parentChatId resolves',
+        detail: `turn "${turn.id}" references missing parent "${turn.parentChatId}"`,
+      })
+    }
+  }
+  const attempts = await db.providerRequestAttempts.toArray()
+  for (const attempt of attempts) {
+    if (!turnIds.has(attempt.turnId)) {
+      failures.push({
+        rule: 'attempt.turnId resolves',
+        detail: `attempt "${attempt.id}" references missing turn "${attempt.turnId}"`,
+      })
+    }
+    if (!messageIds.has(attempt.assistantMessageId)) {
+      failures.push({
+        rule: 'attempt.assistantMessageId resolves',
+        detail: `attempt "${attempt.id}" references missing message "${attempt.assistantMessageId}"`,
+      })
+    }
+  }
+
   // EXTENSION POINTS for later units:
-  // - U6: every closed turn has a stopReason; every attempt belongs to a turn.
   // - U11: chatParticipants.chatId may resolve to threads.id whose parent
   //   chat has kind='channel'.
 

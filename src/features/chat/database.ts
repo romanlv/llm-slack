@@ -8,7 +8,9 @@ import type {
   ConversationThread,
   ParentChat,
   PinnedMessage,
+  ProviderRequestAttempt,
   SavedMessage,
+  Turn,
 } from '@/features/chat/domain'
 import type { ModelOverride, ProviderConnection } from '@/features/providers/entities'
 import type { AppSettings } from '@/features/settings/settings-repository'
@@ -24,6 +26,8 @@ export class LlmSlackDatabase extends Dexie {
   agents!: EntityTable<Agent, 'id'>
   chatParticipants!: EntityTable<ChannelParticipant, 'id'>
   channelSettings!: EntityTable<ChannelSettings, 'id'>
+  turns!: EntityTable<Turn, 'id'>
+  providerRequestAttempts!: EntityTable<ProviderRequestAttempt, 'id'>
   settings!: EntityTable<AppSettings, 'id'>
 
   constructor(name = 'llm-slack') {
@@ -256,6 +260,33 @@ export class LlmSlackDatabase extends Dexie {
         chatParticipants:
           'id, chatId, agentId, [chatId+sortKey], &[chatId+agentId]',
         channelSettings: 'id',
+        settings: 'id',
+      })
+
+    // v8: turn lifecycle. Adds turns + providerRequestAttempts so every
+    // send has a place to record stop reason, per-agent ownership, and
+    // (later) cancellation provenance. Empty tables — existing in-flight
+    // 'streaming' rows are not migrated; recovery for them is tracked
+    // separately (P0c.3).
+    this.version(8)
+      .stores({
+        parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
+        threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+        messages:
+          'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+        pinnedMessages:
+          'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+        savedMessages:
+          'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
+        providers: 'id, kind, createdAt',
+        modelOverrides: 'id, providerId, &[providerId+providerModelId]',
+        agents: 'id, createdAt, updatedAt',
+        chatParticipants:
+          'id, chatId, agentId, [chatId+sortKey], &[chatId+agentId]',
+        channelSettings: 'id',
+        turns: 'id, parentChatId, conversationId, status, [conversationId+createdAt]',
+        providerRequestAttempts:
+          'id, turnId, assistantMessageId, agentId, [turnId+attemptNumber]',
         settings: 'id',
       })
   }

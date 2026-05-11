@@ -361,9 +361,76 @@ describe('v7 migration (channel persistence)', () => {
   })
 })
 
+async function withV7Db(seed: (legacy: Dexie) => Promise<void>) {
+  const legacy = new Dexie(TEST_DB_NAME)
+  legacy.version(1).stores({
+    parentChats: 'id, createdAt, updatedAt, archivedAt',
+    threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+    messages:
+      'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+    settings: 'id',
+  })
+  legacy.version(2).stores({
+    pinnedMessages:
+      'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+  })
+  legacy.version(3).stores({
+    savedMessages: 'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
+  })
+  legacy.version(4).stores({
+    parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt',
+  })
+  legacy.version(5).stores({
+    providers: 'id, kind, createdAt',
+    modelOverrides: 'id, providerId, &[providerId+providerModelId]',
+  })
+  legacy.version(6).stores({
+    parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
+    agents: 'id, createdAt, updatedAt',
+  })
+  legacy.version(7).stores({
+    chatParticipants: 'id, chatId, agentId, [chatId+sortKey], &[chatId+agentId]',
+    channelSettings: 'id',
+  })
+  await legacy.open()
+  try {
+    await seed(legacy)
+  } finally {
+    legacy.close()
+  }
+}
+
+describe('v8 migration (turn lifecycle)', () => {
+  it('adds turns + providerRequestAttempts as empty tables; existing data intact', async () => {
+    await withV7Db(async (legacy) => {
+      await legacy.table('parentChats').put({
+        id: 'p',
+        title: 'dm',
+        model: { providerKind: 'openrouter', providerModelId: 'm' },
+        kind: 'dm',
+        createdAt: 1,
+        updatedAt: 1,
+        draft: '',
+        lastActivityPreview: '',
+      })
+    })
+
+    const upgraded = new LlmSlackDatabase(TEST_DB_NAME)
+    await upgraded.open()
+    try {
+      expect(upgraded.verno).toBeGreaterThanOrEqual(8)
+      expect(await upgraded.parentChats.count()).toBe(1)
+      expect(await upgraded.turns.count()).toBe(0)
+      expect(await upgraded.providerRequestAttempts.count()).toBe(0)
+    } finally {
+      upgraded.close()
+    }
+  })
+})
+
 describe('module singleton db', () => {
   it('opens cleanly on a fresh IDB (no legacy rows)', async () => {
     await db.open()
-    expect(db.verno).toBeGreaterThanOrEqual(7)
+    expect(db.verno).toBeGreaterThanOrEqual(8)
   })
 })

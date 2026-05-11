@@ -21,6 +21,16 @@ import {
   clearStreamController,
   registerStreamController,
 } from '@/features/chat/stream-controllers'
+import {
+  attemptStillCurrent,
+  cancelAttempt,
+  closeTurn,
+  completeAttempt,
+  failAttempt,
+  markAttemptStreaming,
+  openAttempt,
+  openTurn,
+} from '@/features/chat/turn-lifecycle'
 import type { ModelRef } from '@/features/providers/model-ref'
 import { resolveForSend, type ResolveForSendResult } from '@/features/providers/models-catalog'
 import { getAdapter } from '@/features/providers/registry'
@@ -128,7 +138,7 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
   const trimmed = prompt.trim()
   await markParentDraftSent(parentChatId, trimmed)
 
-  await appendUserMessage({
+  const userMessage = await appendUserMessage({
     conversationType: 'parent',
     conversationId: parentChatId,
     parentChatId,
@@ -146,8 +156,27 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
       : {}),
   })
 
-  const controller = registerStreamController(parentChatId)
+  const turn = await openTurn({
+    parentChatId,
+    conversationType: 'parent',
+    conversationId: parentChatId,
+    userMessageId: userMessage.id,
+  })
+  const { attempt, controller: attemptController } = await openAttempt({
+    turnId: turn.id,
+    assistantMessageId: assistantMessage.id,
+    agentId: agent?.id,
+    model: snapshot,
+  })
+  // Keep the legacy registerStreamController hook so the existing
+  // user-cancel UI keeps working until U10 adopts the lifecycle directly.
+  const legacyController = registerStreamController(parentChatId)
+  // Link the two so aborting either aborts both.
+  attemptController.signal.addEventListener('abort', () => legacyController.abort())
+  legacyController.signal.addEventListener('abort', () => attemptController.abort())
+
   try {
+    await markAttemptStreaming(attempt.id)
     const conversation = await getParentConversation(parentChatId)
     if (estimateContextSize(conversation) > APPROX_CONTEXT_CHAR_LIMIT) {
       throw new Error(
@@ -164,23 +193,34 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
       // Surface QuotaExceededError (or any persistence failure) by aborting
       // the stream — the AbortError path below converts it to a failed message
       // status rather than leaving it stuck in 'streaming'.
-      if (!controller.signal.aborted) controller.abort(err)
+      if (!legacyController.signal.aborted) legacyController.abort(err)
     }
 
     const response = await adapter.streamChat(resolved.connection, snapshot, {
       messages: transport,
-      signal: controller.signal,
+      signal: attemptController.signal,
       onChunk: (chunk) => {
         assistantContent += chunk
-        updateMessage(assistantMessage.id, {
-          content: assistantContent,
-          status: 'streaming',
-        }).catch(onUnawaitedWriteError)
+        // Ownership-guarded write: skip if the attempt was already closed
+        // by the lifecycle (e.g. user-interrupt). Without this guard, a
+        // late chunk would resurrect 'streaming' status after closeTurn.
+        attemptStillCurrent(attempt.id)
+          .then((ok) => {
+            if (!ok) return
+            return updateMessage(assistantMessage.id, {
+              content: assistantContent,
+              status: 'streaming',
+            })
+          })
+          .catch(onUnawaitedWriteError)
       },
       onMessageId: (id) => {
-        updateMessage(assistantMessage.id, { providerRequestId: id }).catch(
-          onUnawaitedWriteError,
-        )
+        attemptStillCurrent(attempt.id)
+          .then((ok) => {
+            if (!ok) return
+            return updateMessage(assistantMessage.id, { providerRequestId: id })
+          })
+          .catch(onUnawaitedWriteError)
       },
     })
 
@@ -189,19 +229,28 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
     if (response.id) {
       await updateMessage(assistantMessage.id, { providerRequestId: response.id })
     }
+    await completeAttempt(attempt.id, {
+      providerRequestId: response.id,
+      usage: response.usage,
+    })
     await finalizeParentChatAfterSend(parentChatId, trimmed, finalContent)
+    await closeTurn(turn.id, 'complete')
   } catch (error) {
-    if (isAbortError(error) || controller.signal.aborted) {
+    if (isAbortError(error) || legacyController.signal.aborted) {
       await failMessage(assistantMessage.id, 'Request cancelled.', 'Cancelled')
+      await cancelAttempt(attempt.id)
+      await closeTurn(turn.id, 'user-interrupt')
       await finalizeParentChatAfterSend(parentChatId, trimmed, 'Request cancelled.')
       return
     }
     const message = normalizeErrorMessage(error)
     await failMessage(assistantMessage.id, `Request failed: ${message}`, message)
+    await failAttempt(attempt.id, message)
+    await closeTurn(turn.id, 'error')
     await finalizeParentChatAfterSend(parentChatId, trimmed, `Request failed: ${message}`)
     throw new Error(message)
   } finally {
-    clearStreamController(parentChatId, controller)
+    clearStreamController(parentChatId, legacyController)
   }
 }
 
@@ -233,7 +282,7 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
   const trimmed = prompt.trim()
   await markThreadDraftSent(threadId, thread.parentChatId, trimmed)
 
-  await appendUserMessage({
+  const userMessage = await appendUserMessage({
     conversationType: 'thread',
     conversationId: threadId,
     parentChatId: thread.parentChatId,
@@ -255,8 +304,24 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
 
   await syncRootReplyCountForThread(threadId)
 
-  const controller = registerStreamController(threadId)
+  const turn = await openTurn({
+    parentChatId: thread.parentChatId,
+    conversationType: 'thread',
+    conversationId: threadId,
+    userMessageId: userMessage.id,
+  })
+  const { attempt, controller: attemptController } = await openAttempt({
+    turnId: turn.id,
+    assistantMessageId: assistantMessage.id,
+    agentId: agent?.id,
+    model: snapshot,
+  })
+  const legacyController = registerStreamController(threadId)
+  attemptController.signal.addEventListener('abort', () => legacyController.abort())
+  legacyController.signal.addEventListener('abort', () => attemptController.abort())
+
   try {
+    await markAttemptStreaming(attempt.id)
     const conversation = await getThreadConversation(threadId)
     if (estimateContextSize(conversation) > APPROX_CONTEXT_CHAR_LIMIT) {
       throw new Error(
@@ -270,23 +335,31 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     const adapter = getAdapter(resolved.connection.kind)
 
     const onUnawaitedWriteError = (err: unknown) => {
-      if (!controller.signal.aborted) controller.abort(err)
+      if (!legacyController.signal.aborted) legacyController.abort(err)
     }
 
     const response = await adapter.streamChat(resolved.connection, snapshot, {
       messages: transport,
-      signal: controller.signal,
+      signal: attemptController.signal,
       onChunk: (chunk) => {
         assistantContent += chunk
-        updateMessage(assistantMessage.id, {
-          content: assistantContent,
-          status: 'streaming',
-        }).catch(onUnawaitedWriteError)
+        attemptStillCurrent(attempt.id)
+          .then((ok) => {
+            if (!ok) return
+            return updateMessage(assistantMessage.id, {
+              content: assistantContent,
+              status: 'streaming',
+            })
+          })
+          .catch(onUnawaitedWriteError)
       },
       onMessageId: (id) => {
-        updateMessage(assistantMessage.id, { providerRequestId: id }).catch(
-          onUnawaitedWriteError,
-        )
+        attemptStillCurrent(attempt.id)
+          .then((ok) => {
+            if (!ok) return
+            return updateMessage(assistantMessage.id, { providerRequestId: id })
+          })
+          .catch(onUnawaitedWriteError)
       },
     })
 
@@ -295,15 +368,24 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     if (response.id) {
       await updateMessage(assistantMessage.id, { providerRequestId: response.id })
     }
+    await completeAttempt(attempt.id, {
+      providerRequestId: response.id,
+      usage: response.usage,
+    })
     await finalizeThreadAfterSend(threadId, thread.parentChatId, trimmed, finalContent)
+    await closeTurn(turn.id, 'complete')
   } catch (error) {
-    if (isAbortError(error) || controller.signal.aborted) {
+    if (isAbortError(error) || legacyController.signal.aborted) {
       await failMessage(assistantMessage.id, 'Request cancelled.', 'Cancelled')
+      await cancelAttempt(attempt.id)
+      await closeTurn(turn.id, 'user-interrupt')
       await finalizeThreadAfterSend(threadId, thread.parentChatId, trimmed, 'Request cancelled.')
       return
     }
     const message = normalizeErrorMessage(error)
     await failMessage(assistantMessage.id, `Request failed: ${message}`, message)
+    await failAttempt(attempt.id, message)
+    await closeTurn(turn.id, 'error')
     await finalizeThreadAfterSend(
       threadId,
       thread.parentChatId,
@@ -312,6 +394,6 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     )
     throw new Error(message)
   } finally {
-    clearStreamController(threadId, controller)
+    clearStreamController(threadId, legacyController)
   }
 }

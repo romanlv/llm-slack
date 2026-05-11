@@ -107,6 +107,56 @@ export const DEFAULT_CHANNEL_SETTINGS: Omit<ChannelSettings, 'id' | 'createdAt' 
   allowAgentThreading: true,
 }
 
+// Turn lifecycle (U6+). A turn is one user-initiated send; it may produce
+// one attempt (DM) or many (channel fan-out). Stop reasons:
+//   complete       — every candidate that could speak did, or the single
+//                    attempt finished.
+//   no-trigger     — a step yielded zero messages (every candidate stayed
+//                    silent, or no candidates remained).
+//   cap-hit        — orchestrator stopped because a safety cap fired
+//                    (max chained sub-turns, max per-agent messages,
+//                    token budget).
+//   user-interrupt — the user cancelled mid-stream.
+//   error          — every in-flight attempt errored without recovery.
+export type StopReason = 'complete' | 'no-trigger' | 'cap-hit' | 'user-interrupt' | 'error'
+export type TurnStatus = 'active' | 'closed'
+
+export interface Turn {
+  id: string
+  parentChatId: string
+  conversationType: ConversationType
+  conversationId: string
+  status: TurnStatus
+  userMessageId: string
+  stopReason?: StopReason
+  createdAt: number
+  updatedAt: number
+}
+
+export type ProviderAttemptStatus =
+  | 'pending'
+  | 'streaming'
+  | 'complete'
+  | 'cancelled'
+  | 'error'
+  | 'decided-silent'
+
+export interface ProviderRequestAttempt {
+  id: string
+  turnId: string
+  assistantMessageId: string
+  agentId?: string
+  model: ModelRef
+  status: ProviderAttemptStatus
+  attemptNumber: number
+  providerRequestId?: string
+  startedAt: number
+  completedAt?: number
+  errorCode?: string
+  errorRetryable?: boolean
+  usage?: ProviderUsage
+}
+
 export interface ChatMessage {
   id: string
   conversationType: ConversationType
