@@ -143,6 +143,7 @@ export async function deleteProvider(id: string) {
       db.parentChats,
       db.threads,
       db.messages,
+      db.agents,
     ],
     async () => {
       const target = await db.providers.get(id)
@@ -236,6 +237,20 @@ async function rewriteSnapshotsClearingProvider(providerId: string) {
     .modify((message) => {
       if (message.model?.providerId === providerId) {
         message.model = dropProviderId(message.model)
+      }
+      if (message.agentSnapshot?.model.providerId === providerId) {
+        message.agentSnapshot = {
+          ...message.agentSnapshot,
+          model: dropProviderId(message.agentSnapshot.model),
+        }
+      }
+    })
+
+  await db.agents
+    .toCollection()
+    .modify((agent) => {
+      if (agent.model.providerId === providerId) {
+        agent.model = dropProviderId(agent.model)
       }
     })
 }

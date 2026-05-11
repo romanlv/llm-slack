@@ -4,10 +4,31 @@ export type MessageRole = 'assistant' | 'system' | 'user'
 export type MessageStatus = 'complete' | 'error' | 'streaming'
 export type ConversationType = 'parent' | 'thread'
 
+export type ChatKind = 'dm' | 'channel'
+
+export interface Agent {
+  id: string
+  displayName: string
+  // Per-agent model is mandatory — agents are addressable participants and
+  // the orchestrator needs a model to call. Null at the row level would
+  // require every call site to fall back to the chat's model, which only
+  // makes sense for model-DMs (no agent).
+  model: ModelRef
+  systemPrompt: string
+  createdAt: number
+  updatedAt: number
+}
+
 export interface ParentChat {
   id: string
   title: string
   model: ModelRef | null
+  // 'dm' covers today's model-DMs and the U3 agent-DM shape; 'channel' is
+  // U5+. Legacy rows are backfilled to 'dm' in the v6 upgrade.
+  kind: ChatKind
+  // Set only for agent-DMs (kind='dm' with a configured agent). Null for
+  // model-DMs and channels. R1 invariant: must be null when kind='channel'.
+  agentId?: string | null
   createdAt: number
   updatedAt: number
   archivedAt?: number
@@ -42,6 +63,14 @@ export interface ProviderUsage {
   raw?: unknown
 }
 
+// Snapshot of an agent's display-relevant identity at the time the message
+// was authored. Mirrors the ModelRef snapshot pattern — if the agent
+// definition is later deleted or renamed, history stays renderable.
+export interface AgentMessageSnapshot {
+  displayName: string
+  model: ModelRef
+}
+
 export interface ChatMessage {
   id: string
   conversationType: ConversationType
@@ -53,6 +82,10 @@ export interface ChatMessage {
   status: MessageStatus
   directReplyCount: number
   model?: ModelRef
+  // Set only for assistant messages authored by an agent (agent-DM or
+  // channel). Null/absent on model-DM messages.
+  agentId?: string | null
+  agentSnapshot?: AgentMessageSnapshot
   providerRequestId?: string
   providerUsage?: ProviderUsage
   error?: string

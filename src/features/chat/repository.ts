@@ -46,12 +46,20 @@ export type SavedMessageWithContext = SavedMessage & {
 
 let seedParentChatPromise: Promise<void> | null = null
 
-export async function createParentChat(input?: Partial<Pick<ParentChat, 'model' | 'title'>>) {
+export async function createParentChat(
+  input?: Partial<Pick<ParentChat, 'model' | 'title' | 'kind' | 'agentId'>>,
+) {
   const now = Date.now()
+  const kind: ParentChat['kind'] = input?.kind ?? 'dm'
+  if (kind === 'channel' && input?.agentId) {
+    throw new Error('parentChats.agentId must be null when kind="channel".')
+  }
   const chat: ParentChat = {
     id: crypto.randomUUID(),
     title: input?.title?.trim() || 'Untitled chat',
     model: input?.model ?? null,
+    kind,
+    ...(input?.agentId ? { agentId: input.agentId } : {}),
     createdAt: now,
     updatedAt: now,
     draft: '',

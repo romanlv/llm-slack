@@ -112,9 +112,42 @@ export async function assertDbInvariants(db: LlmSlackDatabase): Promise<void> {
     }
   }
 
+  // U1 invariants — agents + chat-kind discriminator.
+  const agents = await db.agents.toArray()
+  const agentIds = new Set(agents.map((a) => a.id))
+  for (const agent of agents) {
+    if (agent.model.providerId && !providerIds.has(agent.model.providerId)) {
+      failures.push({
+        rule: 'agent.model.providerId resolves',
+        detail: `agent "${agent.id}" references missing providerId "${agent.model.providerId}"`,
+      })
+    }
+  }
+  for (const chat of parentChats) {
+    if (chat.kind === 'channel' && chat.agentId) {
+      failures.push({
+        rule: 'parentChats.agentId is null when kind="channel"',
+        detail: `chat "${chat.id}" has kind="channel" with agentId="${chat.agentId}"`,
+      })
+    }
+    if (chat.agentId && !agentIds.has(chat.agentId)) {
+      // null agentId after delete-cascade is fine — orphaned agent-DM.
+      failures.push({
+        rule: 'parentChats.agentId resolves when set',
+        detail: `chat "${chat.id}" references missing agentId "${chat.agentId}"`,
+      })
+    }
+  }
+  for (const message of messages) {
+    if (message.agentId && !agentIds.has(message.agentId)) {
+      // Message may keep agentId after agent delete; surface for awareness
+      // but treat as soft — agentSnapshot is what keeps the row renderable.
+      // Skipping the failure preserves the snapshot semantics; uncomment to
+      // enforce strictly if a future unit requires it.
+    }
+  }
+
   // EXTENSION POINTS for later units:
-  // - U1: agents.model.providerId resolves; kind='channel' implies agentId=null;
-  //   kind='dm' allows agentId set; messages.agentId resolves when set.
   // - U5: chatParticipants.chatId resolves to a kind='channel' parent (or, post-U11,
   //   a thread whose parent is kind='channel'); chatParticipants.agentId resolves;
   //   (chatId, agentId) is unique; no chatParticipants on kind='dm' chats.

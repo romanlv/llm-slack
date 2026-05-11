@@ -26,6 +26,7 @@ async function seedSnapshot(providerId: string, providerModelId = 'model-x') {
     updatedAt: 1,
     draft: '',
     lastActivityPreview: '',
+    kind: 'dm',
   })
   await db.threads.add({
     id: 't1',
@@ -52,6 +53,24 @@ async function seedSnapshot(providerId: string, providerModelId = 'model-x') {
 }
 
 describe('providers repository cascade delete', () => {
+  it('strips providerId from agent.model when an agent points at the deleted provider', async () => {
+    const provider = await createProvider({ kind: 'openrouter', label: 'OR', apiKey: 'k' })
+    const agent = {
+      id: 'agent-x',
+      displayName: 'Critic',
+      model: { providerId: provider.id, providerKind: 'openrouter' as const, providerModelId: 'm-1' },
+      systemPrompt: '',
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    await db.agents.add(agent)
+
+    await deleteProvider(provider.id)
+
+    const refreshed = await db.agents.get('agent-x')
+    expect(refreshed?.model).toEqual({ providerKind: 'openrouter', providerModelId: 'm-1' })
+  })
+
   it('strips providerId from every snapshot and removes the provider with its overrides', async () => {
     const provider = await createProvider({ kind: 'openrouter', label: 'OR', apiKey: 'key' })
     await upsertOverride(

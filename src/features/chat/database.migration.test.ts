@@ -156,9 +156,140 @@ describe('v5 migration', () => {
   })
 })
 
+async function withV5Db(seed: (legacy: Dexie) => Promise<void>) {
+  const legacy = new Dexie(TEST_DB_NAME)
+  legacy.version(1).stores({
+    parentChats: 'id, createdAt, updatedAt, archivedAt',
+    threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+    messages:
+      'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+    settings: 'id',
+  })
+  legacy.version(2).stores({
+    parentChats: 'id, createdAt, updatedAt, archivedAt',
+    threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+    messages:
+      'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+    pinnedMessages:
+      'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+    settings: 'id',
+  })
+  legacy.version(3).stores({
+    parentChats: 'id, createdAt, updatedAt, archivedAt',
+    threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+    messages:
+      'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+    pinnedMessages:
+      'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+    savedMessages:
+      'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
+    settings: 'id',
+  })
+  legacy.version(4).stores({
+    parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt',
+    threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+    messages:
+      'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+    pinnedMessages:
+      'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+    savedMessages:
+      'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
+    settings: 'id',
+  })
+  legacy.version(5).stores({
+    parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt',
+    threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+    messages:
+      'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+    pinnedMessages:
+      'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+    savedMessages:
+      'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
+    providers: 'id, kind, createdAt',
+    modelOverrides: 'id, providerId, &[providerId+providerModelId]',
+    settings: 'id',
+  })
+  await legacy.open()
+  try {
+    await seed(legacy)
+  } finally {
+    legacy.close()
+  }
+}
+
+describe('v6 migration (multi-agent foundation)', () => {
+  it('backfills parentChats.kind to "dm" on legacy rows and leaves existing data intact', async () => {
+    await withV5Db(async (legacy) => {
+      await legacy.table('parentChats').put({
+        id: 'parent-legacy',
+        title: 'Legacy chat',
+        model: { providerKind: 'openrouter', providerModelId: 'm' },
+        createdAt: 1,
+        updatedAt: 1,
+        draft: '',
+        lastActivityPreview: '',
+      })
+      await legacy.table('messages').put({
+        id: 'msg-legacy',
+        conversationType: 'parent',
+        conversationId: 'parent-legacy',
+        parentChatId: 'parent-legacy',
+        role: 'user',
+        content: 'hi',
+        createdAt: 1,
+        status: 'complete',
+        directReplyCount: 0,
+      })
+    })
+
+    const upgraded = new LlmSlackDatabase(TEST_DB_NAME)
+    await upgraded.open()
+    try {
+      expect(upgraded.verno).toBeGreaterThanOrEqual(6)
+
+      const parent = await upgraded.parentChats.get('parent-legacy')
+      expect(parent?.kind).toBe('dm')
+      expect(parent?.agentId).toBeUndefined()
+      // Message left intact.
+      const message = await upgraded.messages.get('msg-legacy')
+      expect(message?.content).toBe('hi')
+
+      // The agents store exists and starts empty.
+      expect(await upgraded.agents.count()).toBe(0)
+    } finally {
+      upgraded.close()
+    }
+  })
+
+  it('does not overwrite a kind that was already set (re-run safety)', async () => {
+    await withV5Db(async (legacy) => {
+      await legacy.table('parentChats').put({
+        id: 'p',
+        title: 'already-set',
+        model: null,
+        // Pretend a prior upgrade tagged this row already.
+        kind: 'channel',
+        createdAt: 1,
+        updatedAt: 1,
+        draft: '',
+        lastActivityPreview: '',
+      })
+    })
+
+    const upgraded = new LlmSlackDatabase(TEST_DB_NAME)
+    await upgraded.open()
+    try {
+      const parent = await upgraded.parentChats.get('p')
+      expect(parent?.kind).toBe('channel')
+    } finally {
+      upgraded.close()
+    }
+  })
+})
+
 describe('module singleton db', () => {
   it('opens cleanly on a fresh IDB (no legacy rows)', async () => {
     await db.open()
-    expect(db.verno).toBeGreaterThanOrEqual(5)
+    expect(db.verno).toBeGreaterThanOrEqual(6)
   })
 })

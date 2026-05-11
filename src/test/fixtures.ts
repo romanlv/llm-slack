@@ -59,6 +59,7 @@ export async function seedModelDm(options: SeedModelDmOptions = {}): Promise<Par
     id: options.id ?? seq('chat'),
     title: options.title ?? 'Test chat',
     model: options.model ?? makeModelRef(),
+    kind: 'dm',
     createdAt: now,
     updatedAt: now,
     draft: '',
@@ -117,7 +118,49 @@ export async function seedMessageInThread(
   return message
 }
 
-// NOTE: seedAgent / seedAgentDm / seedChannel will land alongside U1
-// (agents table) and U5 (chatParticipants, channelSettings). They are
-// intentionally absent here so they can't be called against an unsupported
-// schema — adding them as throwing stubs would obscure the actual error.
+export interface SeedAgentOptions {
+  id?: string
+  displayName?: string
+  model?: ModelRef
+  systemPrompt?: string
+  createdAt?: number
+}
+
+export async function seedAgent(options: SeedAgentOptions = {}): Promise<import('@/features/chat/domain').Agent> {
+  const now = options.createdAt ?? Date.now()
+  const agent = {
+    id: options.id ?? seq('agent'),
+    displayName: options.displayName ?? `Agent ${counter}`,
+    model: options.model ?? makeModelRef(),
+    systemPrompt: options.systemPrompt ?? '',
+    createdAt: now,
+    updatedAt: now,
+  }
+  await db.agents.add(agent)
+  return agent
+}
+
+export interface SeedAgentDmOptions {
+  id?: string
+  agent: import('@/features/chat/domain').Agent
+  title?: string
+}
+
+export async function seedAgentDm(options: SeedAgentDmOptions): Promise<ParentChat> {
+  const now = Date.now()
+  const chat: ParentChat = {
+    id: options.id ?? seq('chat'),
+    title: options.title ?? `DM: ${options.agent.displayName}`,
+    model: options.agent.model,
+    kind: 'dm',
+    agentId: options.agent.id,
+    createdAt: now,
+    updatedAt: now,
+    draft: '',
+    lastActivityPreview: '',
+  }
+  await db.parentChats.add(chat)
+  return chat
+}
+
+// NOTE: seedChannel lands alongside U5 (chatParticipants, channelSettings).

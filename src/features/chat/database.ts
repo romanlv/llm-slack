@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie'
 
 import type {
+  Agent,
   ChatMessage,
   ConversationThread,
   ParentChat,
@@ -18,6 +19,7 @@ export class LlmSlackDatabase extends Dexie {
   savedMessages!: EntityTable<SavedMessage, 'id'>
   providers!: EntityTable<ProviderConnection, 'id'>
   modelOverrides!: EntityTable<ModelOverride, 'id'>
+  agents!: EntityTable<Agent, 'id'>
   settings!: EntityTable<AppSettings, 'id'>
 
   constructor(name = 'llm-slack') {
@@ -196,6 +198,38 @@ export class LlmSlackDatabase extends Dexie {
 
           await settingsTable.put(next)
         }
+      })
+
+    // v6: introduce the multi-agent foundation. Adds the agents store and
+    // the chat-kind discriminator on parentChats. Legacy parentChats rows
+    // are backfilled to kind='dm' (today's model-DM behavior). agentId
+    // remains absent on every backfilled row; new agent-DMs created in U3
+    // populate it. R1 invariant — kind='channel' implies agentId null — is
+    // not yet enforceable since no channels can exist before U5.
+    this.version(6)
+      .stores({
+        parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
+        threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+        messages:
+          'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+        pinnedMessages:
+          'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+        savedMessages:
+          'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
+        providers: 'id, kind, createdAt',
+        modelOverrides: 'id, providerId, &[providerId+providerModelId]',
+        agents: 'id, createdAt, updatedAt',
+        settings: 'id',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('parentChats')
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            if (row.kind === undefined) {
+              row.kind = 'dm'
+            }
+          })
       })
   }
 }

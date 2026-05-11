@@ -13,6 +13,7 @@ describe('dumpDb', () => {
       updatedAt: 2,
       draft: '',
       lastActivityPreview: '',
+      kind: 'dm',
     })
     await db.parentChats.add({
       id: 'p1',
@@ -22,6 +23,7 @@ describe('dumpDb', () => {
       updatedAt: 1,
       draft: '',
       lastActivityPreview: '',
+      kind: 'dm',
     })
 
     const first = await dumpDb(db, { tables: ['parentChats'] })

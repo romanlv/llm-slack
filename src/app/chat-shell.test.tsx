@@ -58,6 +58,7 @@ function parentChat(overrides: Partial<ParentChat> = {}): ParentChat {
     updatedAt: 1,
     draft: '',
     lastActivityPreview: '',
+    kind: 'dm',
     ...overrides,
   }
 }
