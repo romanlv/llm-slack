@@ -14,7 +14,7 @@ Land the data, lifecycle, and UI primitives that let `llm-slack` host both today
 
 ## Execution status (as of 2026-05-10)
 
-Branch: `feat/multi-agent-foundation`. Test suite: 245 passing across 32 files; typecheck clean.
+Branch: `feat/multi-agent-foundation`. Test suite: 256 passing across 34 files; typecheck clean.
 
 | Unit | Status | Commit | Notes |
 |------|--------|--------|-------|
@@ -28,8 +28,8 @@ Branch: `feat/multi-agent-foundation`. Test suite: 245 passing across 32 files; 
 | U11 — Schema v9 + thread participant snapshot | ✅ Done | `20390e1` | Plan "v5" → actual **v9**. Schema bump is logical only (`chatParticipants.chatId` already accepted any id). |
 | U2 — Agents library page | ✅ Done | `af5f8a5` | First Phase-2 unit. Adds `AgentDot`, `AgentEditor`, `AgentsPageContent`, `/settings/agents` route, AI-nav entry. |
 | U4 — New-chat modal | ✅ Done | `25ec0c2` | 3-tab modal (Model / Agent / Channel placeholder). Wired into `chat-shell` "New chat" + `home-page` "Start a conversation". |
-| U9 — Channel creation flow | ✅ Done | _pending commit_ | Adds `createChannel` atomic repo helper (chat + settings + participants in one transaction). Channel tab now shows the name input + agent multi-select + per-agent mode picker (auto-decide / mention-only). |
-| U10 — Channel UI | ⏳ Not started | — | — |
+| U9 — Channel creation flow | ✅ Done | `efaf6bb` | Adds `createChannel` atomic repo helper (chat + settings + participants in one transaction). Channel tab now shows the name input + agent multi-select + per-agent mode picker (auto-decide / mention-only). |
+| U10 — Channel UI | 🟡 Partial (slice 1) | _pending commit_ | Ships: per-message agent identity rendering (AgentDot + agent display name in workspace), channel header "Channel settings" button, `ChannelSettingsDialog` with Agents (`ChannelParticipantsPanel`) + Behavior (`ChannelSettingsPanel`) tabs. **Carry-overs:** Cancel button on running turns (requires runtime turn tracking) and sidebar marker distinguishing model-DM vs agent-DM rows — both follow in slice 2. |
 | U13 — Sidebar restructure | ⏳ Not started | — | — |
 | U12 — Docs update | ⏳ Not started | — | Land after all UI is in. |
 
@@ -706,7 +706,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U10. Channel UI: agent identity, participant panel, channel settings, kind badge, cancel ⏳ not started
+### U10. Channel UI: agent identity, participant panel, channel settings, kind badge, cancel 🟡 partial (slice 1 shipped)
 
 **Goal:** All the UI affordances a channel needs to be usable: per-message agent identity, an in-channel participant panel, a channel settings panel, sidebar kind badges, and a Cancel button on running turns.
 

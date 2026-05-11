@@ -17,12 +17,16 @@ import {
   SendHorizonal,
   Star,
   Trash2,
+  UsersRound,
   X,
 } from 'lucide-react'
 
 import { Menu, MenuItem } from '@/components/ui/menu'
 
+import { AgentDot } from '@/features/agents/agent-dot'
+import { ChannelSettingsDialog } from '@/features/chat/components/channel-settings-dialog'
 import { MessageMarkdown } from '@/features/chat/components/message-markdown'
+import type { ChannelParticipant } from '@/features/chat/domain'
 import { sendParentChatTurn, sendThreadTurn } from '@/features/chat/send-turn'
 import {
   countStartedBranchesForParentChat,
@@ -30,6 +34,7 @@ import {
   deleteMessage,
   deleteThread,
   editMessageContent,
+  listChannelParticipants,
   listPinnedMessagesForParentChat,
   getThreadAncestorChain,
   getOrCreateThreadForMessage,
@@ -132,6 +137,12 @@ function messageElementId(messageId: string) {
 
 function authorLabel(message: ChatMessage, userName: string) {
   if (message.role === 'assistant') {
+    // Agent-authored messages (agent-DM or channel) carry the agent's
+    // identity in `agentSnapshot`. Falling back to the model name keeps
+    // legacy model-DMs unchanged.
+    if (message.agentSnapshot) {
+      return message.agentSnapshot.displayName
+    }
     return modelShortName(message.model) ?? 'Assistant'
   }
 
@@ -204,6 +215,18 @@ function Avatar({
   userName: string
 }) {
   if (message.role === 'assistant') {
+    // Agent-authored messages render with the agent's stable colored
+    // marker (initials in a hashed palette slot). Model-DMs keep the
+    // original "~" glyph so AE7 byte-parity holds.
+    if (message.agentSnapshot) {
+      return (
+        <AgentDot
+          agentId={message.agentId ?? undefined}
+          displayName={message.agentSnapshot.displayName}
+          size="md"
+        />
+      )
+    }
     return (
       <div className="flex size-7 shrink-0 items-center justify-center rounded bg-accent font-mono text-heading font-bold leading-none text-white">
         ~
@@ -830,20 +853,26 @@ function ThreadActionsMenu({
 function ChannelHeader({
   activeTab,
   branchCount,
+  isChannel,
   messageCount,
+  onOpenChannelSettings,
   onRename,
   onTabChange,
   onToggleStar,
+  participantCount,
   pinnedCount,
   starred,
   title,
 }: {
   activeTab: ParentTab
   branchCount: number
+  isChannel: boolean
   messageCount: number
+  onOpenChannelSettings?: () => void
   onRename: (title: string) => void
   onTabChange: (tab: ParentTab) => void
   onToggleStar: () => void
+  participantCount?: number
   pinnedCount: number
   starred: boolean
   title: string
@@ -901,7 +930,23 @@ function ChannelHeader({
           <span className="text-ink-dim">
             branches <strong className="ml-1 text-accent">{branchCount}</strong>
           </span>
+          {isChannel ? (
+            <span className="text-ink-dim">
+              agents <strong className="ml-1 text-accent">{participantCount ?? 0}</strong>
+            </span>
+          ) : null}
         </div>
+        {isChannel && onOpenChannelSettings ? (
+          <button
+            className="inline-flex h-7 items-center gap-1.5 rounded border border-line bg-surface-muted px-2 font-mono text-meta font-semibold text-ink-muted transition hover:bg-canvas hover:text-ink"
+            onClick={onOpenChannelSettings}
+            title="Channel settings"
+            type="button"
+          >
+            <UsersRound className="size-3.5" />
+            Channel settings
+          </button>
+        ) : null}
         <button
           type="button"
           title="Branch map"
@@ -1089,9 +1134,18 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
   const [sendingParent, setSendingParent] = useState(false)
   const [sendingThreadId, setSendingThreadId] = useState<string | null>(null)
   const [parentTab, setParentTab] = useState<ParentTab>('messages')
+  const [channelSettingsOpen, setChannelSettingsOpen] = useState(false)
   const pendingMessageJumpRef = useRef<string | null>(null)
 
   const parentChat = useLiveQuery(() => db.parentChats.get(chatId), [chatId], undefined)
+  const channelParticipants = useLiveQuery(
+    () =>
+      parentChat?.kind === 'channel'
+        ? listChannelParticipants(parentChat.id)
+        : Promise.resolve([] as ChannelParticipant[]),
+    [parentChat?.id, parentChat?.kind],
+    [] as ChannelParticipant[],
+  )
   const settings = useLiveQuery(() => getSettings(), [], undefined)
   const parentMessages = useLiveQuery(
     () =>
@@ -1402,10 +1456,17 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
         <ChannelHeader
           activeTab={parentTab}
           branchCount={branchCount}
+          isChannel={parentChat.kind === 'channel'}
           messageCount={parentMessages.length}
+          onOpenChannelSettings={
+            parentChat.kind === 'channel'
+              ? () => setChannelSettingsOpen(true)
+              : undefined
+          }
           onRename={(title) => void renameParentChat(parentChat.id, title)}
           onTabChange={setParentTab}
           onToggleStar={() => void toggleStarParentChat(parentChat.id)}
+          participantCount={channelParticipants.length}
           pinnedCount={parentPinnedMessages.length}
           starred={Boolean(parentChat.starredAt)}
           title={parentChat.title}
@@ -1629,6 +1690,15 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
             </p>
           </div>
         </div>
+      ) : null}
+
+      {parentChat.kind === 'channel' ? (
+        <ChannelSettingsDialog
+          chatId={parentChat.id}
+          onOpenChange={setChannelSettingsOpen}
+          open={channelSettingsOpen}
+          title={parentChat.title}
+        />
       ) : null}
     </div>
   )

@@ -404,4 +404,89 @@ describe('ParentChatWorkspace', () => {
     await expect(db.messages.get('m1')).resolves.toBeDefined()
     expect(screen.getByText('keep me')).toBeInTheDocument()
   })
+
+  it('renders an assistant message with the agent display name and an AgentDot when an agentSnapshot is present', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(
+      message({
+        id: 'user-1',
+        content: 'hi',
+      }),
+    )
+    await db.messages.add(
+      message({
+        id: 'agent-1',
+        role: 'assistant',
+        content: 'Hello back!',
+        agentId: 'agent-pm',
+        agentSnapshot: { displayName: 'PM Lens', model: TEST_MODEL_REF },
+        createdAt: 2,
+      }),
+    )
+
+    render(<ParentChatWorkspace chatId="parent-1" />)
+
+    // The author label shows the agent's display name, not the model name.
+    expect(await screen.findByText('PM Lens')).toBeInTheDocument()
+    // The legacy "~" assistant glyph should NOT appear when an agent owns
+    // the message — it is replaced by the AgentDot.
+    expect(screen.queryByText('~')).toBeNull()
+  })
+
+  it('falls back to the model short name on assistant messages without an agent snapshot (AE7 byte-parity)', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(
+      message({
+        id: 'assistant-1',
+        role: 'assistant',
+        content: 'Plain reply.',
+        createdAt: 2,
+      }),
+    )
+
+    render(<ParentChatWorkspace chatId="parent-1" />)
+
+    // Model-DM behavior preserved: legacy assistant glyph remains.
+    expect(await screen.findByText('~')).toBeInTheDocument()
+  })
+
+  it('shows the Channel settings affordance only on channel-kind chats', async () => {
+    // First: a DM chat. The button should not render.
+    await db.parentChats.add(parentChat())
+    render(<ParentChatWorkspace chatId="parent-1" />)
+    await screen.findByDisplayValue('Planning')
+    expect(
+      screen.queryByRole('button', { name: /channel settings/i }),
+    ).toBeNull()
+
+    cleanup()
+
+    // Second: a channel chat. The button is visible and opens the dialog.
+    await db.parentChats.put(parentChat({ id: 'parent-2', title: 'launch', kind: 'channel', model: null }))
+    await db.channelSettings.put({
+      id: 'parent-2',
+      maxChainedSubTurns: 3,
+      maxMessagesPerAgentPerInput: 2,
+      tokenBudgetPerInput: 200_000,
+      defaultParticipationMode: 'auto-decide',
+      allowAgentThreading: true,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+
+    render(<ParentChatWorkspace chatId="parent-2" />)
+
+    const settingsBtn = await screen.findByRole('button', {
+      name: /channel settings/i,
+    })
+    await userEvent.click(settingsBtn)
+
+    expect(
+      await screen.findByRole('heading', { name: /^launch$/i }),
+    ).toBeInTheDocument()
+    // Agents tab is the default tab and renders the empty state.
+    expect(
+      await screen.findByText(/no agents in this channel yet/i),
+    ).toBeInTheDocument()
+  })
 })
