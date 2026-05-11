@@ -127,6 +127,24 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
     throw new Error('Archived conversations cannot accept new sends.')
   }
 
+  // Channels go through the orchestrator (U7). The user message is
+  // persisted here so callers see consistent ordering; the orchestrator
+  // takes over from openTurn.
+  if (parentChat.kind === 'channel') {
+    const trimmed = prompt.trim()
+    await markParentDraftSent(parentChatId, trimmed)
+    const userMessage = await appendUserMessage({
+      conversationType: 'parent',
+      conversationId: parentChatId,
+      parentChatId,
+      prompt: trimmed,
+      model: undefined,
+    })
+    const { runChannelTurn } = await import('@/features/chat/orchestrator')
+    await runChannelTurn({ chatId: parentChatId, userMessageId: userMessage.id })
+    return
+  }
+
   const agent = await resolveAgentBinding(parentChat.agentId)
   const resolved = await resolveSendTarget(agent ? agent.model : parentChat.model ?? null)
   const snapshot: ModelRef = {

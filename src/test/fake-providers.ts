@@ -1,3 +1,4 @@
+import { SILENCE_SENTINEL } from '@/features/chat/decide-to-respond'
 import type { ProviderConnection } from '@/features/providers/entities'
 import type { ModelRef } from '@/features/providers/model-ref'
 import type {
@@ -5,11 +6,7 @@ import type {
   StreamChatResult,
 } from '@/features/providers/provider-contract'
 
-// Sentinel a fake script can return to indicate the agent decided to stay
-// silent. The orchestrator's decide-to-respond parser (U7) recognises this
-// start-anchored marker as `decided-silent`. Keeping the constant here lets
-// every test target the same wire format without depending on U7 internals.
-export const SILENCE_SENTINEL = '<silent>'
+export { SILENCE_SENTINEL }
 
 export interface FakeProviderCall {
   connection: ProviderConnection

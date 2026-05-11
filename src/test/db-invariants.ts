@@ -220,7 +220,14 @@ export async function assertDbInvariants(db: LlmSlackDatabase): Promise<void> {
         detail: `attempt "${attempt.id}" references missing turn "${attempt.turnId}"`,
       })
     }
-    if (!messageIds.has(attempt.assistantMessageId)) {
+    // 'decided-silent' attempts intentionally have no message row (R11); we
+    // tombstone the field to '' instead of dropping it so the typed shape
+    // stays simple.
+    if (
+      attempt.status !== 'decided-silent' &&
+      attempt.assistantMessageId &&
+      !messageIds.has(attempt.assistantMessageId)
+    ) {
       failures.push({
         rule: 'attempt.assistantMessageId resolves',
         detail: `attempt "${attempt.id}" references missing message "${attempt.assistantMessageId}"`,

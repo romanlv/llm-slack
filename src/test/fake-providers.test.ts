@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import { SILENCE_SENTINEL } from '@/features/chat/decide-to-respond'
 import type { ProviderConnection } from '@/features/providers/entities'
 import type { ModelRef } from '@/features/providers/model-ref'
 
 import {
-  SILENCE_SENTINEL,
   createFakeStreamChat,
   installFakeProviders,
 } from '@/test/fake-providers'
