@@ -137,15 +137,117 @@ describe('NewChatModal', () => {
     expect(link.getAttribute('href')).toBe('/settings/agents')
   })
 
-  it('renders a coming-soon placeholder on the Channel tab', async () => {
+  it('shows the no-agents empty state on the Channel tab when the agents library is empty', async () => {
     renderWithHarness()
 
-    await userEvent.click(await screen.findByRole("button", { name: /open new chat/i }))
+    await userEvent.click(
+      await screen.findByRole('button', { name: /open new chat/i }),
+    )
     await userEvent.click(screen.getByRole('tab', { name: /channel/i }))
 
+    expect(await screen.findByText(/no agents yet/i)).toBeInTheDocument()
+    const link = screen.getByRole('link', { name: /open agents library/i })
+    expect(link.getAttribute('href')).toBe('/settings/agents')
+  })
+
+  it('creates a channel with the selected agents and lands on it', async () => {
+    const a = await seedAgent('Alpha')
+    const b = await seedAgent('Beta')
+    const { router } = renderWithHarness()
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: /open new chat/i }),
+    )
+    await userEvent.click(screen.getByRole('tab', { name: /channel/i }))
+
+    const nameInput = await screen.findByPlaceholderText(/launch-plan/i)
+    await userEvent.type(nameInput, 'launch')
+
+    // Toggle both agents into the participant set.
+    await userEvent.click(screen.getByRole('button', { name: /alpha/i }))
+    await userEvent.click(screen.getByRole('button', { name: /beta/i }))
+
+    // Switch Beta to mention-only via the inline mode select.
+    const modeSelects = screen
+      .getAllByRole('combobox')
+      .filter((el) => el.tagName === 'SELECT') as HTMLSelectElement[]
+    expect(modeSelects.length).toBe(2)
+    await userEvent.selectOptions(modeSelects[1]!, 'mention-only')
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /create channel/i }),
+    )
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toMatch(/^\/chat\//)
+    })
+    const chats = await db.parentChats.toArray()
+    const channel = chats.find((c) => c.kind === 'channel')
+    expect(channel?.title).toBe('launch')
+    const participants = await db.chatParticipants
+      .where('chatId')
+      .equals(channel!.id)
+      .toArray()
+    expect(participants.length).toBe(2)
+    const byAgent = new Map(participants.map((p) => [p.agentId, p.mode]))
+    expect(byAgent.get(a.id)).toBe('auto-decide')
+    expect(byAgent.get(b.id)).toBe('mention-only')
+    const settings = await db.channelSettings.get(channel!.id)
+    expect(settings?.allowAgentThreading).toBe(true)
+  })
+
+  it('rejects an empty channel name without creating the chat', async () => {
+    await seedAgent('Solo')
+    renderWithHarness()
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: /open new chat/i }),
+    )
+    await userEvent.click(screen.getByRole('tab', { name: /channel/i }))
+
+    // Wait for the agents list to populate (useLiveQuery is async), so the
+    // form (not the empty state) is on screen.
+    await screen.findByPlaceholderText(/launch-plan/i)
+
+    // Submit without typing a name.
+    await userEvent.click(
+      screen.getByRole('button', { name: /create channel/i }),
+    )
+
     expect(
-      await screen.findByText(/channels are coming soon/i),
+      await screen.findByText(/channel name is required/i),
     ).toBeInTheDocument()
+    const chats = await db.parentChats.toArray()
+    expect(chats.filter((c) => c.kind === 'channel').length).toBe(0)
+  })
+
+  it('allows creating a channel with zero participants (creator can add agents later)', async () => {
+    // Seed an agent so the empty-state doesn't intercept the form.
+    await seedAgent('Solo')
+    const { router } = renderWithHarness()
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: /open new chat/i }),
+    )
+    await userEvent.click(screen.getByRole('tab', { name: /channel/i }))
+
+    const nameInput = await screen.findByPlaceholderText(/launch-plan/i)
+    await userEvent.type(nameInput, 'empty-room')
+    await userEvent.click(
+      screen.getByRole('button', { name: /create channel/i }),
+    )
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toMatch(/^\/chat\//)
+    })
+    const chats = await db.parentChats.toArray()
+    const channel = chats.find((c) => c.title === 'empty-room')
+    expect(channel?.kind).toBe('channel')
+    const participants = await db.chatParticipants
+      .where('chatId')
+      .equals(channel!.id)
+      .toArray()
+    expect(participants).toHaveLength(0)
   })
 
   it('returns the same empty model-DM on repeated Start clicks (idempotent entry)', async () => {

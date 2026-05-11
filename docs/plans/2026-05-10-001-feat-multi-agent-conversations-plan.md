@@ -14,7 +14,7 @@ Land the data, lifecycle, and UI primitives that let `llm-slack` host both today
 
 ## Execution status (as of 2026-05-10)
 
-Branch: `feat/multi-agent-foundation`. Test suite: 236 passing across 32 files; typecheck clean.
+Branch: `feat/multi-agent-foundation`. Test suite: 245 passing across 32 files; typecheck clean.
 
 | Unit | Status | Commit | Notes |
 |------|--------|--------|-------|
@@ -27,8 +27,8 @@ Branch: `feat/multi-agent-foundation`. Test suite: 236 passing across 32 files; 
 | U7 — Orchestrator | ✅ Done with three deferrals (see below) | `6de596e` | Core fan-out, decide-to-respond, caps, stop reasons all land. |
 | U11 — Schema v9 + thread participant snapshot | ✅ Done | `20390e1` | Plan "v5" → actual **v9**. Schema bump is logical only (`chatParticipants.chatId` already accepted any id). |
 | U2 — Agents library page | ✅ Done | `af5f8a5` | First Phase-2 unit. Adds `AgentDot`, `AgentEditor`, `AgentsPageContent`, `/settings/agents` route, AI-nav entry. |
-| U4 — New-chat modal | ✅ Done | _pending commit_ | 3-tab modal (Model / Agent / Channel placeholder). Wired into `chat-shell` "New chat" + `home-page` "Start a conversation". Channel tab is a coming-soon placeholder until U9. |
-| U9 — Channel creation flow | ⏳ Not started | — | — |
+| U4 — New-chat modal | ✅ Done | `25ec0c2` | 3-tab modal (Model / Agent / Channel placeholder). Wired into `chat-shell` "New chat" + `home-page` "Start a conversation". |
+| U9 — Channel creation flow | ✅ Done | _pending commit_ | Adds `createChannel` atomic repo helper (chat + settings + participants in one transaction). Channel tab now shows the name input + agent multi-select + per-agent mode picker (auto-decide / mention-only). |
 | U10 — Channel UI | ⏳ Not started | — | — |
 | U13 — Sidebar restructure | ⏳ Not started | — | — |
 | U12 — Docs update | ⏳ Not started | — | Land after all UI is in. |
@@ -45,7 +45,7 @@ These were called out in U7's commit message and are not silent gaps. Each lands
 
 Phase 2 is in flight. Next-session entry point:
 
-- **U2 and U4 are shipped.** Continue with **U9** (Channel-creation flow — enables the Channel tab; see [§Implementation Units](#implementation-units)).
+- **U2, U4, and U9 are shipped.** Continue with **U10** (Channel UI — agent identity rendering, participants panel, channel-settings panel, kind badge, Cancel button; see [§Implementation Units](#implementation-units)).
 - All Phase-1 invariants are exercised by `assertDbInvariants` — call it at the end of any new integration test to catch cross-table regressions for free.
 - Design references at `docs/design/2026-05-10-multi-agent-conversations/direction-b-agents.jsx` are the primary UI source for U2/U4/U9/U10. See the [Design References](#design-references) section.
 - `pnpm test` and `pnpm typecheck` are the green-bar gate; the husky pre-commit hook enforces both.
@@ -666,7 +666,7 @@ Each helper is small, opinionated, and tested in isolation. Cumulatively they re
 
 ---
 
-### U9. New-chat picker: enable Channel tab + channel creation flow ⏳ not started
+### U9. New-chat picker: enable Channel tab + channel creation flow ✅ shipped
 
 **Goal:** Wire the Channel tab in U4's modal to a real channel-creation flow.
 

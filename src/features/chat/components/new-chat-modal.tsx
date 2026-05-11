@@ -1,14 +1,16 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { Bot, Hash, MessageSquarePlus } from 'lucide-react'
+import { Bot, Check, Hash, MessageSquarePlus } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { AgentDot } from '@/features/agents/agent-dot'
 import { listAgents } from '@/features/agents/agents-repository'
-import type { Agent, ParentChat } from '@/features/chat/domain'
+import type { Agent, ParentChat, ParticipationMode } from '@/features/chat/domain'
 import {
+  createChannel,
   findOrCreateAgentDm,
   findOrCreateEmptyParentChat,
 } from '@/features/chat/repository'
@@ -92,6 +94,23 @@ function NewChatModalBody({ onClose }: { onClose: () => void }) {
     }
   }
 
+  const startChannel = async (input: {
+    title: string
+    participants: Array<{ agentId: string; mode: ParticipationMode }>
+  }) => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const chat = await createChannel({
+        title: input.title,
+        participants: input.participants,
+      })
+      await goToChat(chat)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <>
       <header className="flex items-start gap-3 border-b border-line bg-surface px-6 py-5 pr-12">
@@ -141,7 +160,9 @@ function NewChatModalBody({ onClose }: { onClose: () => void }) {
           {tab === 'agent' ? (
             <AgentTab busy={busy} onPick={startAgentDm} />
           ) : null}
-          {tab === 'channel' ? <ChannelTab /> : null}
+          {tab === 'channel' ? (
+            <ChannelTab busy={busy} onCreate={startChannel} />
+          ) : null}
         </div>
       </div>
     </>
@@ -235,18 +256,210 @@ function AgentTab({
   )
 }
 
-function ChannelTab() {
+function ChannelTab({
+  busy,
+  onCreate,
+}: {
+  busy: boolean
+  onCreate: (input: {
+    title: string
+    participants: Array<{ agentId: string; mode: ParticipationMode }>
+  }) => void
+}) {
+  const agents = useLiveQuery(() => listAgents(), [], [] as Agent[])
+  const [title, setTitle] = useState('')
+  const [selections, setSelections] = useState<Record<string, ParticipationMode>>({})
+  const [error, setError] = useState('')
+  const titleId = useId()
+
+  const toggleAgent = (agentId: string) => {
+    setSelections((prev) => {
+      const next = { ...prev }
+      if (next[agentId]) {
+        delete next[agentId]
+      } else {
+        next[agentId] = 'auto-decide'
+      }
+      return next
+    })
+  }
+  const setMode = (agentId: string, mode: ParticipationMode) => {
+    setSelections((prev) => (prev[agentId] ? { ...prev, [agentId]: mode } : prev))
+  }
+
+  const participants = Object.entries(selections).map(([agentId, mode]) => ({
+    agentId,
+    mode,
+  }))
+
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (busy) return
+    const trimmed = title.trim()
+    if (!trimmed) {
+      setError('Channel name is required.')
+      return
+    }
+    setError('')
+    onCreate({ title: trimmed, participants })
+  }
+
+  if (agents.length === 0) {
+    return (
+      <div className="grid gap-3 rounded-md border border-dashed border-line bg-surface/60 px-6 py-10 text-center">
+        <Hash className="mx-auto size-8 text-ink-muted" />
+        <div>
+          <p className="text-body font-semibold text-ink">No agents yet</p>
+          <p className="mt-1 text-small text-ink-muted">
+            Channels need at least one agent. Create one first — you can
+            always come back to add more.
+          </p>
+        </div>
+        <div>
+          <Link
+            className="inline-flex items-center gap-1.5 rounded-full border border-line bg-canvas px-4 py-2 text-small font-medium text-ink transition hover:bg-canvas/60"
+            to="/settings/agents"
+          >
+            Open agents library
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="grid gap-3 rounded-md border border-dashed border-line bg-surface/60 px-6 py-10 text-center">
-      <Hash className="mx-auto size-8 text-ink-muted" />
+    <form className="grid gap-4" onSubmit={submit}>
       <div>
-        <p className="text-body font-semibold text-ink">Channels are coming soon</p>
+        <h3 className="text-heading font-semibold text-ink">New channel</h3>
         <p className="mt-1 text-small text-ink-muted">
-          A channel hosts multiple agents in one room — each decides whether
-          to respond to a message. The creation flow lands in a follow-up
-          unit.
+          A channel hosts a roster of agents; each decides whether to
+          respond. Agent participation modes can be edited later in channel
+          settings.
         </p>
       </div>
-    </div>
+
+      <div className="grid gap-1.5">
+        <label
+          className="font-mono text-meta font-semibold uppercase tracking-wider text-ink-muted"
+          htmlFor={titleId}
+        >
+          Name
+        </label>
+        <div className="flex items-center gap-2">
+          <span aria-hidden className="font-mono text-body text-ink-dim">
+            #
+          </span>
+          <Input
+            autoFocus
+            id={titleId}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="e.g. launch-plan"
+            value={title}
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-2">
+        <div className="flex items-baseline justify-between">
+          <span className="font-mono text-meta font-semibold uppercase tracking-wider text-ink-muted">
+            Agents
+          </span>
+          <span className="font-mono text-meta text-ink-muted">
+            {participants.length} selected
+          </span>
+        </div>
+        <ul className="grid gap-2">
+          {agents.map((agent) => {
+            const selectedMode = selections[agent.id]
+            const selected = Boolean(selectedMode)
+            return (
+              <li key={agent.id}>
+                <div
+                  className={cn(
+                    'flex items-center gap-3 rounded-md border bg-surface px-3 py-2 transition',
+                    selected ? 'border-accent/40 ring-1 ring-accent/30' : 'border-line',
+                  )}
+                >
+                  <button
+                    aria-pressed={selected}
+                    className="flex flex-1 items-center gap-3 text-left"
+                    onClick={() => toggleAgent(agent.id)}
+                    type="button"
+                  >
+                    <span
+                      className={cn(
+                        'flex size-5 shrink-0 items-center justify-center rounded border transition',
+                        selected
+                          ? 'border-accent bg-accent text-white'
+                          : 'border-line bg-canvas',
+                      )}
+                    >
+                      {selected ? <Check className="size-3.5" /> : null}
+                    </span>
+                    <AgentDot
+                      agentId={agent.id}
+                      displayName={agent.displayName}
+                      size="md"
+                    />
+                    <div className="min-w-0">
+                      <div className="text-body font-semibold text-ink">
+                        {agent.displayName}
+                      </div>
+                      <div className="font-mono text-meta text-ink-muted">
+                        {agent.model.providerModelId}
+                      </div>
+                    </div>
+                  </button>
+                  {selected ? (
+                    <ModeSelect
+                      onChange={(mode) => setMode(agent.id, mode)}
+                      value={selectedMode!}
+                    />
+                  ) : null}
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+        {participants.length === 0 ? (
+          <p className="text-small text-ink-muted">
+            Add at least one agent to start — but you can also create an
+            empty channel and add agents from channel settings later.
+          </p>
+        ) : null}
+      </div>
+
+      {error ? (
+        <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-small text-danger">
+          {error}
+        </p>
+      ) : null}
+
+      <div>
+        <Button disabled={busy} type="submit">
+          <Hash className="size-4" />
+          Create channel
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+function ModeSelect({
+  onChange,
+  value,
+}: {
+  onChange: (mode: ParticipationMode) => void
+  value: ParticipationMode
+}) {
+  return (
+    <select
+      className="h-8 rounded-md border border-line bg-surface px-2 font-mono text-meta text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onChange={(event) => onChange(event.target.value as ParticipationMode)}
+      value={value}
+    >
+      <option value="auto-decide">auto-decide</option>
+      <option value="mention-only">mention-only</option>
+    </select>
   )
 }

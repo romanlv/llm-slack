@@ -74,6 +74,93 @@ export async function createParentChat(
   return chat
 }
 
+export interface CreateChannelParticipantInput {
+  agentId: string
+  mode?: ParticipationMode
+}
+
+export interface CreateChannelInput {
+  title: string
+  participants?: CreateChannelParticipantInput[]
+}
+
+// Atomic channel creation: parentChats row + chatParticipants rows + a
+// channelSettings row populated with app-level defaults, all in one
+// transaction. The Channel tab in the new-chat modal goes through this so
+// the user never sees a partial channel (chat without participants, or
+// participants without settings).
+export async function createChannel(input: CreateChannelInput): Promise<ParentChat> {
+  const title = input.title.trim()
+  if (!title) {
+    throw new Error('Channel title is required.')
+  }
+  const participants = input.participants ?? []
+  const seenAgentIds = new Set<string>()
+  for (const participant of participants) {
+    if (seenAgentIds.has(participant.agentId)) {
+      throw new Error(
+        `Agent "${participant.agentId}" cannot be a channel participant twice.`,
+      )
+    }
+    seenAgentIds.add(participant.agentId)
+  }
+
+  return db.transaction(
+    'rw',
+    [db.parentChats, db.chatParticipants, db.channelSettings, db.agents],
+    async () => {
+      // Validate every agent exists before creating any row so the
+      // transaction either fully succeeds or fully fails.
+      for (const participant of participants) {
+        const agent = await db.agents.get(participant.agentId)
+        if (!agent) {
+          throw new Error(
+            `Cannot create channel: agent "${participant.agentId}" does not exist.`,
+          )
+        }
+      }
+
+      const now = Date.now()
+      const chat: ParentChat = {
+        id: crypto.randomUUID(),
+        title,
+        model: null,
+        kind: 'channel',
+        createdAt: now,
+        updatedAt: now,
+        draft: '',
+        lastActivityPreview: 'Start the conversation.',
+      }
+      await db.parentChats.add(chat)
+
+      const settings: ChannelSettings = {
+        id: chat.id,
+        ...DEFAULT_CHANNEL_SETTINGS,
+        createdAt: now,
+        updatedAt: now,
+      }
+      await db.channelSettings.put(settings)
+
+      // Assign each participant a strictly-monotonic sortKey so listing
+      // order is stable even when several adds share a millisecond.
+      const baseSortKey = Math.max(now, 0)
+      const rows: ChannelParticipant[] = participants.map((participant, index) => ({
+        id: crypto.randomUUID(),
+        chatId: chat.id,
+        agentId: participant.agentId,
+        mode: participant.mode ?? settings.defaultParticipationMode,
+        sortKey: baseSortKey + index,
+        createdAt: now,
+      }))
+      if (rows.length > 0) {
+        await db.chatParticipants.bulkAdd(rows)
+      }
+
+      return chat
+    },
+  )
+}
+
 // Per-agent equivalent of findOrCreateEmptyParentChat. Returns the most
 // recent non-archived agent-DM for `agentId` if one exists, otherwise
 // creates a fresh one snapshotting the agent's current model.

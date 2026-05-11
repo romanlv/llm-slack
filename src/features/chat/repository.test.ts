@@ -443,6 +443,126 @@ describe('thread repository semantics', () => {
     expect(await listChannelParticipants(thread.id)).toHaveLength(0)
   })
 
+  it('createChannel atomically creates the chat row, settings, and participant rows', async () => {
+    const { createAgent } = await import('@/features/agents/agents-repository')
+    const {
+      createChannel,
+      getChannelSettings,
+      listChannelParticipants,
+    } = await import('@/features/chat/repository')
+
+    const a = await createAgent({
+      displayName: 'A',
+      model: { providerKind: 'openrouter', providerModelId: 'm' },
+    })
+    const b = await createAgent({
+      displayName: 'B',
+      model: { providerKind: 'openrouter', providerModelId: 'm' },
+    })
+
+    const channel = await createChannel({
+      title: 'launch',
+      participants: [
+        { agentId: a.id, mode: 'auto-decide' },
+        { agentId: b.id, mode: 'mention-only' },
+      ],
+    })
+
+    expect(channel.kind).toBe('channel')
+    expect(channel.title).toBe('launch')
+    expect(channel.agentId).toBeUndefined()
+
+    const settings = await getChannelSettings(channel.id)
+    expect(settings).toBeDefined()
+    expect(settings?.defaultParticipationMode).toBe('auto-decide')
+    expect(settings?.allowAgentThreading).toBe(true)
+
+    const participants = await listChannelParticipants(channel.id)
+    expect(participants.map((p) => p.agentId)).toEqual([a.id, b.id])
+    expect(participants.map((p) => p.mode)).toEqual(['auto-decide', 'mention-only'])
+    // sortKey must be strictly monotonic so listing order is stable.
+    expect(participants[1]!.sortKey).toBeGreaterThan(participants[0]!.sortKey)
+  })
+
+  it('createChannel allows zero participants — the channel exists, settings exist, no participant rows', async () => {
+    const { createChannel, getChannelSettings, listChannelParticipants } =
+      await import('@/features/chat/repository')
+
+    const channel = await createChannel({ title: 'empty-room' })
+
+    expect(channel.kind).toBe('channel')
+    expect(await getChannelSettings(channel.id)).toBeDefined()
+    expect(await listChannelParticipants(channel.id)).toHaveLength(0)
+  })
+
+  it('createChannel defaults each participant mode to the channel default when no mode is given', async () => {
+    const { createAgent } = await import('@/features/agents/agents-repository')
+    const { createChannel, listChannelParticipants } = await import(
+      '@/features/chat/repository'
+    )
+
+    const a = await createAgent({
+      displayName: 'A',
+      model: { providerKind: 'openrouter', providerModelId: 'm' },
+    })
+
+    const channel = await createChannel({
+      title: 'defaults',
+      participants: [{ agentId: a.id }],
+    })
+
+    const [participant] = await listChannelParticipants(channel.id)
+    expect(participant?.mode).toBe('auto-decide')
+  })
+
+  it('createChannel rolls back fully when an agent id does not exist', async () => {
+    const { createAgent } = await import('@/features/agents/agents-repository')
+    const { createChannel, listChannelParticipants } = await import(
+      '@/features/chat/repository'
+    )
+    const before = await db.parentChats.count()
+
+    const a = await createAgent({
+      displayName: 'A',
+      model: { providerKind: 'openrouter', providerModelId: 'm' },
+    })
+
+    await expect(
+      createChannel({
+        title: 'bad',
+        participants: [{ agentId: a.id }, { agentId: 'ghost' }],
+      }),
+    ).rejects.toThrow(/ghost/)
+
+    // Transaction rolled back: no new chat, no participant row, no settings.
+    await expect(db.parentChats.count()).resolves.toBe(before)
+    await expect(db.channelSettings.count()).resolves.toBe(0)
+    await expect(
+      listChannelParticipants(''),
+    ).resolves.toHaveLength(0)
+  })
+
+  it('createChannel rejects duplicate agent ids in the participant list', async () => {
+    const { createAgent } = await import('@/features/agents/agents-repository')
+    const { createChannel } = await import('@/features/chat/repository')
+    const a = await createAgent({
+      displayName: 'A',
+      model: { providerKind: 'openrouter', providerModelId: 'm' },
+    })
+
+    await expect(
+      createChannel({
+        title: 'dupes',
+        participants: [{ agentId: a.id }, { agentId: a.id }],
+      }),
+    ).rejects.toThrow(/twice/)
+  })
+
+  it('createChannel rejects an empty title', async () => {
+    const { createChannel } = await import('@/features/chat/repository')
+    await expect(createChannel({ title: '   ' })).rejects.toThrow(/required/i)
+  })
+
   it('seeds the first conversation once when called concurrently', async () => {
     await Promise.all([ensureSeedParentChat(), ensureSeedParentChat()])
 
