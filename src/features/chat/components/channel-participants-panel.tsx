@@ -1,22 +1,20 @@
 import { useId, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Link } from '@tanstack/react-router'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, UserPlus } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { AgentDot } from '@/features/agents/agent-dot'
+import { AgentEditor } from '@/features/agents/agent-editor'
 import { listAgents } from '@/features/agents/agents-repository'
-import type {
-  Agent,
-  ChannelParticipant,
-  ParticipationMode,
-} from '@/features/chat/domain'
+import type { Agent, ChannelParticipant } from '@/features/chat/domain'
 import {
   addChannelParticipant,
   listChannelParticipants,
   removeChannelParticipant,
   setChannelParticipantMode,
 } from '@/features/chat/repository'
+
+import { ParticipationModeSelect } from './participation-mode-select'
 
 // Add/remove channel participants, edit each one's participation mode. Used
 // inside the channel-settings dialog. Live-queried — every mutation lands
@@ -34,6 +32,7 @@ export function ChannelParticipantsPanel({ chatId }: { chatId: string }) {
 
   const [pendingAgentId, setPendingAgentId] = useState<string>('')
   const [error, setError] = useState('')
+  const [editorOpen, setEditorOpen] = useState(false)
   const selectId = useId()
 
   const handleAdd = async () => {
@@ -47,6 +46,20 @@ export function ChannelParticipantsPanel({ chatId }: { chatId: string }) {
       setPendingAgentId('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add participant.')
+    }
+  }
+
+  // When the agent editor saves a brand-new agent, drop it straight into this
+  // channel so the user doesn't have to re-pick it from the dropdown. For
+  // edits of an existing participant we leave the membership alone (the
+  // editor surfaces the same flow from /settings/agents, where this would be
+  // surprising).
+  const handleAgentSaved = async (agent: Agent) => {
+    if (participantAgentIds.has(agent.id)) return
+    try {
+      await addChannelParticipant({ chatId, agentId: agent.id })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add new agent to channel.')
     }
   }
 
@@ -93,7 +106,7 @@ export function ChannelParticipantsPanel({ chatId }: { chatId: string }) {
                     </div>
                   ) : null}
                 </div>
-                <ModeSelect
+                <ParticipationModeSelect
                   onChange={async (mode) => {
                     try {
                       await setChannelParticipantMode(chatId, participant.agentId, mode)
@@ -131,36 +144,47 @@ export function ChannelParticipantsPanel({ chatId }: { chatId: string }) {
         {agents.length === 0 ? (
           <div className="flex flex-wrap items-center justify-between gap-2 text-small text-ink-muted">
             <span>No agents in your library yet.</span>
-            <Link
-              className="font-mono text-meta text-accent underline"
-              to="/settings/agents"
-            >
-              Open agents library
-            </Link>
-          </div>
-        ) : candidateAgents.length === 0 ? (
-          <p className="text-small text-ink-muted">
-            Every agent in your library is already in this channel.
-          </p>
-        ) : (
-          <div className="flex items-center gap-2">
-            <select
-              className="h-9 flex-1 rounded-md border border-line bg-surface px-3 text-small text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              id={selectId}
-              onChange={(event) => setPendingAgentId(event.target.value)}
-              value={pendingAgentId}
-            >
-              <option value="">Pick an agent…</option>
-              {candidateAgents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.displayName}
-                </option>
-              ))}
-            </select>
-            <Button onClick={handleAdd} size="sm">
-              <Plus className="size-4" /> Add
+            <Button onClick={() => setEditorOpen(true)} size="sm">
+              <UserPlus className="size-4" /> Create new agent
             </Button>
           </div>
+        ) : (
+          <>
+            {candidateAgents.length === 0 ? (
+              <p className="text-small text-ink-muted">
+                Every agent in your library is already in this channel.
+              </p>
+            ) : (
+              <div className="flex items-center gap-2">
+                <select
+                  className="h-9 flex-1 rounded-md border border-line bg-surface px-3 text-small text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  id={selectId}
+                  onChange={(event) => setPendingAgentId(event.target.value)}
+                  value={pendingAgentId}
+                >
+                  <option value="">Pick an agent…</option>
+                  {candidateAgents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.displayName}
+                    </option>
+                  ))}
+                </select>
+                <Button onClick={handleAdd} size="sm">
+                  <Plus className="size-4" /> Add
+                </Button>
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-2 pt-1 text-small text-ink-muted">
+              <span>Need a different one?</span>
+              <button
+                className="inline-flex items-center gap-1.5 font-mono text-meta font-semibold text-accent transition hover:underline"
+                onClick={() => setEditorOpen(true)}
+                type="button"
+              >
+                <UserPlus className="size-3.5" /> Create new agent
+              </button>
+            </div>
+          </>
         )}
       </div>
 
@@ -169,25 +193,12 @@ export function ChannelParticipantsPanel({ chatId }: { chatId: string }) {
           {error}
         </p>
       ) : null}
-    </div>
-  )
-}
 
-function ModeSelect({
-  onChange,
-  value,
-}: {
-  onChange: (mode: ParticipationMode) => void
-  value: ParticipationMode
-}) {
-  return (
-    <select
-      className="h-8 rounded-md border border-line bg-surface px-2 font-mono text-meta text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      onChange={(event) => onChange(event.target.value as ParticipationMode)}
-      value={value}
-    >
-      <option value="auto-decide">auto-decide</option>
-      <option value="mention-only">mention-only</option>
-    </select>
+      <AgentEditor
+        onOpenChange={setEditorOpen}
+        onSaved={(agent) => void handleAgentSaved(agent)}
+        open={editorOpen}
+      />
+    </div>
   )
 }

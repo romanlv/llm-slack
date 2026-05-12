@@ -1,8 +1,6 @@
-import Dexie from 'dexie'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ChatMessage, ParentChat, PinnedMessage } from './domain'
-import { LlmSlackDatabase } from './database'
 import {
   archiveParentChat,
   countStartedBranchesByParentChat,
@@ -403,7 +401,7 @@ describe('thread repository semantics', () => {
     await addChannelParticipant({ chatId: channel.id, agentId: a.id })
     await addChannelParticipant({ chatId: channel.id, agentId: b.id })
 
-    const rootMessage = await db.messages.add(
+    await db.messages.add(
       message({
         id: 'root',
         conversationId: channel.id,
@@ -411,7 +409,6 @@ describe('thread repository semantics', () => {
         role: 'user',
       }),
     )
-    void rootMessage
     const thread = await getOrCreateThreadForMessage('root')
 
     const threadParticipants = await listChannelParticipants(thread.id)
@@ -884,106 +881,6 @@ describe('thread repository semantics', () => {
     expect(remaining.map((entry) => entry.messageId)).toEqual(['p2'])
   })
 
-  it('migrates version 1 data by adding the pinned messages table', async () => {
-    const databaseName = `llm-slack-migration-${crypto.randomUUID()}`
-
-    const legacyDb = new Dexie(databaseName)
-    legacyDb.version(1).stores({
-      parentChats: 'id, createdAt, updatedAt, archivedAt',
-      threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
-      messages:
-        'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
-      settings: 'id',
-    })
-    await legacyDb.open()
-    await legacyDb.table('parentChats').add(parentChat())
-    await legacyDb.table('messages').add(message({ id: 'p1' }))
-    legacyDb.close()
-
-    const migratedDb = new LlmSlackDatabase(databaseName)
-    await migratedDb.open()
-
-    await expect(migratedDb.parentChats.get('parent-1')).resolves.toBeDefined()
-    await expect(migratedDb.messages.get('p1')).resolves.toBeDefined()
-    await expect(migratedDb.pinnedMessages.count()).resolves.toBe(0)
-    await expect(migratedDb.savedMessages.count()).resolves.toBe(0)
-    await migratedDb.pinnedMessages.add({
-      id: 'pin-1',
-      parentChatId: 'parent-1',
-      conversationType: 'parent',
-      conversationId: 'parent-1',
-      messageId: 'p1',
-      pinnedAt: 10,
-      sortKey: 10,
-    })
-    await migratedDb.savedMessages.add({
-      id: 'saved-1',
-      parentChatId: 'parent-1',
-      conversationType: 'parent',
-      conversationId: 'parent-1',
-      messageId: 'p1',
-      createdAt: 11,
-    })
-    await expect(migratedDb.pinnedMessages.count()).resolves.toBe(1)
-    await expect(migratedDb.savedMessages.count()).resolves.toBe(1)
-
-    migratedDb.close()
-    await migratedDb.delete()
-  })
-
-  it('migrates version 2 data by adding the saved messages table', async () => {
-    const databaseName = `llm-slack-migration-v2-${crypto.randomUUID()}`
-
-    const legacyDb = new Dexie(databaseName)
-    legacyDb.version(1).stores({
-      parentChats: 'id, createdAt, updatedAt, archivedAt',
-      threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
-      messages:
-        'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
-      settings: 'id',
-    })
-    legacyDb.version(2).stores({
-      parentChats: 'id, createdAt, updatedAt, archivedAt',
-      threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
-      messages:
-        'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
-      pinnedMessages:
-        'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
-      settings: 'id',
-    })
-    await legacyDb.open()
-    await legacyDb.table('parentChats').add(parentChat())
-    await legacyDb.table('messages').add(message({ id: 'p1' }))
-    await legacyDb.table('pinnedMessages').add({
-      id: 'pin-1',
-      parentChatId: 'parent-1',
-      conversationType: 'parent',
-      conversationId: 'parent-1',
-      messageId: 'p1',
-      pinnedAt: 10,
-      sortKey: 10,
-    })
-    legacyDb.close()
-
-    const migratedDb = new LlmSlackDatabase(databaseName)
-    await migratedDb.open()
-
-    await expect(migratedDb.pinnedMessages.count()).resolves.toBe(1)
-    await expect(migratedDb.savedMessages.count()).resolves.toBe(0)
-    await migratedDb.savedMessages.add({
-      id: 'saved-1',
-      parentChatId: 'parent-1',
-      conversationType: 'parent',
-      conversationId: 'parent-1',
-      messageId: 'p1',
-      createdAt: 99,
-    })
-    await expect(migratedDb.savedMessages.count()).resolves.toBe(1)
-
-    migratedDb.close()
-    await migratedDb.delete()
-  })
-
   it('toggles starred state on a parent chat without bumping updatedAt', async () => {
     await db.parentChats.add(parentChat({ id: 'parent-1', updatedAt: 1_000 }))
 
@@ -1092,51 +989,5 @@ describe('thread repository semantics', () => {
   it('is a no-op when deleting a missing thread', async () => {
     await db.parentChats.add(parentChat())
     await expect(deleteThread('missing-thread')).resolves.toBeUndefined()
-  })
-
-  it('migrates version 3 data by adding the starredAt index without losing rows', async () => {
-    const databaseName = `llm-slack-migration-v3-${crypto.randomUUID()}`
-
-    const legacyDb = new Dexie(databaseName)
-    legacyDb.version(1).stores({
-      parentChats: 'id, createdAt, updatedAt, archivedAt',
-      threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
-      messages:
-        'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
-      settings: 'id',
-    })
-    legacyDb.version(2).stores({
-      parentChats: 'id, createdAt, updatedAt, archivedAt',
-      pinnedMessages:
-        'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
-      settings: 'id',
-    })
-    legacyDb.version(3).stores({
-      parentChats: 'id, createdAt, updatedAt, archivedAt',
-      pinnedMessages:
-        'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
-      savedMessages: 'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
-      settings: 'id',
-    })
-    await legacyDb.open()
-    await legacyDb.table('parentChats').add(parentChat({ id: 'parent-1' }))
-    legacyDb.close()
-
-    const migratedDb = new LlmSlackDatabase(databaseName)
-    await migratedDb.open()
-
-    const preserved = await migratedDb.parentChats.get('parent-1')
-    expect(preserved?.id).toBe('parent-1')
-    expect(preserved?.starredAt).toBeUndefined()
-
-    await migratedDb.parentChats.update('parent-1', { starredAt: 42 })
-    const starred = await migratedDb.parentChats
-      .where('starredAt')
-      .above(0)
-      .toArray()
-    expect(starred.map((row) => row.id)).toEqual(['parent-1'])
-
-    migratedDb.close()
-    await migratedDb.delete()
   })
 })

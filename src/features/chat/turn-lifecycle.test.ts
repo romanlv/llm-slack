@@ -11,7 +11,6 @@ import {
   getActiveTurnForParentChat,
   interruptActiveTurn,
   listAttemptsForTurn,
-  markAttemptDecidedSilent,
   markAttemptStreaming,
   openAttempt,
   openTurn,
@@ -116,23 +115,6 @@ describe('turn lifecycle', () => {
         1, 2, 3,
       ])
     })
-  })
-
-  it('markAttemptDecidedSilent records the orchestrator-only status', async () => {
-    const chat = await seedModelDm()
-    const turn = await openTurn({
-      parentChatId: chat.id,
-      conversationType: 'parent',
-      conversationId: chat.id,
-      userMessageId: 'u',
-    })
-    const { attempt } = await openAttempt({
-      turnId: turn.id,
-      assistantMessageId: 'a',
-      model: makeModelRef(),
-    })
-    await markAttemptDecidedSilent(attempt.id)
-    expect((await db.providerRequestAttempts.get(attempt.id))?.status).toBe('decided-silent')
   })
 
   it('getActiveTurnForConversation returns the latest active turn or undefined', async () => {

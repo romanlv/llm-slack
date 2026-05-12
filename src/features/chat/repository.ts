@@ -1,17 +1,14 @@
 import Dexie from 'dexie'
 import {
-  DEFAULT_CHANNEL_SETTINGS,
   messageToTransport,
   previewText,
   titleFromPrompt,
   type ChannelParticipant,
-  type ChannelSettings,
   type ChatMessage,
   type ConversationThread,
   type ConversationType,
   type MessageRole,
   type ParentChat,
-  type ParticipationMode,
   type PinnedMessage,
   type ProviderUsage,
   type SavedMessage,
@@ -20,6 +17,26 @@ import {
 import { db } from '@/features/chat/database'
 import type { ModelRef } from '@/features/providers/model-ref'
 import { getSettings, type AppSettings } from '@/features/settings/settings-repository'
+
+// Channel-shape operations live in channels-repository.ts; re-exported here
+// so existing callers (which expect `from '@/features/chat/repository'`)
+// keep working without a wide rewire. New callers should import directly
+// from channels-repository.
+export {
+  addChannelParticipant,
+  assertChannelChat,
+  createChannel,
+  getChannelSettings,
+  listChannelParticipants,
+  removeChannelParticipant,
+  setChannelParticipantMode,
+  setChannelSettings,
+} from '@/features/chat/channels-repository'
+export type {
+  AddParticipantInput,
+  CreateChannelInput,
+  CreateChannelParticipantInput,
+} from '@/features/chat/channels-repository'
 
 export {
   previewText,
@@ -72,93 +89,6 @@ export async function createParentChat(
 
   await db.parentChats.add(chat)
   return chat
-}
-
-export interface CreateChannelParticipantInput {
-  agentId: string
-  mode?: ParticipationMode
-}
-
-export interface CreateChannelInput {
-  title: string
-  participants?: CreateChannelParticipantInput[]
-}
-
-// Atomic channel creation: parentChats row + chatParticipants rows + a
-// channelSettings row populated with app-level defaults, all in one
-// transaction. The Channel tab in the new-chat modal goes through this so
-// the user never sees a partial channel (chat without participants, or
-// participants without settings).
-export async function createChannel(input: CreateChannelInput): Promise<ParentChat> {
-  const title = input.title.trim()
-  if (!title) {
-    throw new Error('Channel title is required.')
-  }
-  const participants = input.participants ?? []
-  const seenAgentIds = new Set<string>()
-  for (const participant of participants) {
-    if (seenAgentIds.has(participant.agentId)) {
-      throw new Error(
-        `Agent "${participant.agentId}" cannot be a channel participant twice.`,
-      )
-    }
-    seenAgentIds.add(participant.agentId)
-  }
-
-  return db.transaction(
-    'rw',
-    [db.parentChats, db.chatParticipants, db.channelSettings, db.agents],
-    async () => {
-      // Validate every agent exists before creating any row so the
-      // transaction either fully succeeds or fully fails.
-      for (const participant of participants) {
-        const agent = await db.agents.get(participant.agentId)
-        if (!agent) {
-          throw new Error(
-            `Cannot create channel: agent "${participant.agentId}" does not exist.`,
-          )
-        }
-      }
-
-      const now = Date.now()
-      const chat: ParentChat = {
-        id: crypto.randomUUID(),
-        title,
-        model: null,
-        kind: 'channel',
-        createdAt: now,
-        updatedAt: now,
-        draft: '',
-        lastActivityPreview: 'Start the conversation.',
-      }
-      await db.parentChats.add(chat)
-
-      const settings: ChannelSettings = {
-        id: chat.id,
-        ...DEFAULT_CHANNEL_SETTINGS,
-        createdAt: now,
-        updatedAt: now,
-      }
-      await db.channelSettings.put(settings)
-
-      // Assign each participant a strictly-monotonic sortKey so listing
-      // order is stable even when several adds share a millisecond.
-      const baseSortKey = Math.max(now, 0)
-      const rows: ChannelParticipant[] = participants.map((participant, index) => ({
-        id: crypto.randomUUID(),
-        chatId: chat.id,
-        agentId: participant.agentId,
-        mode: participant.mode ?? settings.defaultParticipationMode,
-        sortKey: baseSortKey + index,
-        createdAt: now,
-      }))
-      if (rows.length > 0) {
-        await db.chatParticipants.bulkAdd(rows)
-      }
-
-      return chat
-    },
-  )
 }
 
 // Per-agent equivalent of findOrCreateEmptyParentChat. Returns the most
@@ -1088,149 +1018,6 @@ export async function syncRootReplyCountForThread(threadId: string) {
     .count()
 
   await db.messages.update(thread.rootMessageId, { directReplyCount: count })
-}
-
-// ─── Channel participants / settings ─────────────────────────────────────
-//
-// Dexie has no foreign keys, so we enforce R6/R7 invariants by running a
-// validator at the start of every write. assertChannelInvariants throws on
-// any rule violation so callers get a clear failure (the test fixtures
-// catch the mistake at write time, not at orchestrator time).
-
-// A "channel target" is either a parent channel chat or a thread whose
-// parent chat is kind='channel' (R17/U11). Both are valid hosts for
-// chatParticipants.
-export async function assertChannelChat(chatId: string) {
-  const chat = await db.parentChats.get(chatId)
-  if (chat) {
-    if (chat.kind !== 'channel') {
-      throw new Error(`Chat "${chatId}" is not a channel (kind="${chat.kind}").`)
-    }
-    if (chat.agentId) {
-      throw new Error(
-        `Chat "${chatId}" has kind="channel" but also agentId="${chat.agentId}". Invariant violation.`,
-      )
-    }
-    return chat
-  }
-  const thread = await db.threads.get(chatId)
-  if (thread) {
-    const parent = await db.parentChats.get(thread.parentChatId)
-    if (!parent || parent.kind !== 'channel') {
-      throw new Error(
-        `Thread "${chatId}" is not under a channel; channel ops are not allowed here.`,
-      )
-    }
-    return parent
-  }
-  throw new Error(`Channel target "${chatId}" does not exist.`)
-}
-
-export async function listChannelParticipants(chatId: string): Promise<ChannelParticipant[]> {
-  return db.chatParticipants
-    .where('[chatId+sortKey]')
-    .between([chatId, Dexie.minKey], [chatId, Dexie.maxKey])
-    .toArray()
-}
-
-export interface AddParticipantInput {
-  chatId: string
-  agentId: string
-  mode?: ParticipationMode
-}
-
-export async function addChannelParticipant(input: AddParticipantInput): Promise<ChannelParticipant> {
-  return db.transaction(
-    'rw',
-    [db.chatParticipants, db.parentChats, db.agents, db.channelSettings],
-    async () => {
-      await assertChannelChat(input.chatId)
-      const agent = await db.agents.get(input.agentId)
-      if (!agent) {
-        throw new Error(`Agent "${input.agentId}" does not exist.`)
-      }
-      const existing = await db.chatParticipants
-        .where('[chatId+agentId]')
-        .equals([input.chatId, input.agentId])
-        .first()
-      if (existing) {
-        throw new Error(
-          `Agent "${input.agentId}" is already a participant in channel "${input.chatId}".`,
-        )
-      }
-      const now = Date.now()
-      const latest = await db.chatParticipants
-        .where('[chatId+sortKey]')
-        .between([input.chatId, Dexie.minKey], [input.chatId, Dexie.maxKey])
-        .reverse()
-        .first()
-      const sortKey = Math.max(now, (latest?.sortKey ?? 0) + 1)
-      const settings = await db.channelSettings.get(input.chatId)
-      const mode =
-        input.mode ?? settings?.defaultParticipationMode ?? DEFAULT_CHANNEL_SETTINGS.defaultParticipationMode
-      const row: ChannelParticipant = {
-        id: crypto.randomUUID(),
-        chatId: input.chatId,
-        agentId: input.agentId,
-        mode,
-        sortKey,
-        createdAt: now,
-      }
-      await db.chatParticipants.add(row)
-      return row
-    },
-  )
-}
-
-export async function removeChannelParticipant(chatId: string, agentId: string): Promise<void> {
-  const row = await db.chatParticipants
-    .where('[chatId+agentId]')
-    .equals([chatId, agentId])
-    .first()
-  if (row) {
-    await db.chatParticipants.delete(row.id)
-  }
-}
-
-export async function setChannelParticipantMode(
-  chatId: string,
-  agentId: string,
-  mode: ParticipationMode,
-): Promise<void> {
-  const row = await db.chatParticipants
-    .where('[chatId+agentId]')
-    .equals([chatId, agentId])
-    .first()
-  if (!row) {
-    throw new Error(`Agent "${agentId}" is not a participant in channel "${chatId}".`)
-  }
-  await db.chatParticipants.update(row.id, { mode })
-}
-
-export async function getChannelSettings(chatId: string): Promise<ChannelSettings | undefined> {
-  return db.channelSettings.get(chatId)
-}
-
-export async function setChannelSettings(
-  chatId: string,
-  updates: Partial<Omit<ChannelSettings, 'id' | 'createdAt' | 'updatedAt'>>,
-): Promise<ChannelSettings> {
-  return db.transaction('rw', [db.channelSettings, db.parentChats], async () => {
-    await assertChannelChat(chatId)
-    const existing = await db.channelSettings.get(chatId)
-    const now = Date.now()
-    const next: ChannelSettings = existing
-      ? { ...existing, ...updates, updatedAt: now }
-      : {
-          id: chatId,
-          ...DEFAULT_CHANNEL_SETTINGS,
-          ...updates,
-          createdAt: now,
-          updatedAt: now,
-        }
-    await db.channelSettings.put(next)
-    return next
-  })
 }
 
 export async function getThreadAncestorChain(threadId: string) {

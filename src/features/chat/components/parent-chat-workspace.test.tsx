@@ -450,7 +450,7 @@ describe('ParentChatWorkspace', () => {
     expect(await screen.findByText('~')).toBeInTheDocument()
   })
 
-  it('renders a Cancel button while a turn is active and closes the turn when clicked', async () => {
+  it('renders a Stop button while a parent turn is active and closes the turn when clicked', async () => {
     await db.parentChats.add(parentChat())
     const now = Date.now()
     await db.turns.add({
@@ -466,9 +466,9 @@ describe('ParentChatWorkspace', () => {
 
     render(<ParentChatWorkspace chatId="parent-1" />)
 
-    const cancelBtn = await screen.findByRole('button', { name: /^cancel$/i })
-    expect(cancelBtn).toBeInTheDocument()
-    await userEvent.click(cancelBtn)
+    const stopBtn = await screen.findByRole('button', { name: /stop response/i })
+    expect(stopBtn).toBeInTheDocument()
+    await userEvent.click(stopBtn)
 
     await waitFor(async () => {
       const refreshed = await db.turns.get('turn-active')
@@ -477,11 +477,37 @@ describe('ParentChatWorkspace', () => {
     })
   })
 
-  it('hides the Cancel button when no turn is active', async () => {
+  it('hides the Stop button when no turn is active', async () => {
     await db.parentChats.add(parentChat())
     render(<ParentChatWorkspace chatId="parent-1" />)
     await screen.findByDisplayValue('Planning')
-    expect(screen.queryByRole('button', { name: /^cancel$/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /stop response/i })).toBeNull()
+  })
+
+  it('keeps the parent Stop button hidden when only a thread-scoped turn is active', async () => {
+    // A turn scoped to a thread should not surface a Stop button in the
+    // main parent composer — only the thread aside should show the
+    // indicator. The user reported parent + thread double-rendering this
+    // banner; the fix scopes by (conversationType, conversationId).
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'root', content: 'root' }))
+    await db.threads.add(thread({ id: 'thread-1', rootMessageId: 'root' }))
+    const now = Date.now()
+    await db.turns.add({
+      id: 'turn-thread',
+      parentChatId: 'parent-1',
+      conversationType: 'thread',
+      conversationId: 'thread-1',
+      status: 'active',
+      userMessageId: 'm-thread',
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    render(<ParentChatWorkspace chatId="parent-1" />)
+
+    await screen.findByDisplayValue('Planning')
+    expect(screen.queryByRole('button', { name: /stop response/i })).toBeNull()
   })
 
   it('shows the Channel settings affordance only on channel-kind chats', async () => {

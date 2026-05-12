@@ -24,6 +24,7 @@ import {
 import { Menu, MenuItem } from '@/components/ui/menu'
 
 import { AgentDot } from '@/features/agents/agent-dot'
+import { getAgent } from '@/features/agents/agents-repository'
 import { ChannelSettingsDialog } from '@/features/chat/components/channel-settings-dialog'
 import { MessageMarkdown } from '@/features/chat/components/message-markdown'
 import type { ChannelParticipant, Turn } from '@/features/chat/domain'
@@ -381,6 +382,52 @@ function MessageEditor({
   )
 }
 
+function ThreadRootPreview({
+  avatarDataUrl,
+  message,
+  replyCount,
+  userName,
+}: {
+  avatarDataUrl?: string
+  message: ChatMessage
+  replyCount: number
+  userName: string
+}) {
+  const replyLabel =
+    replyCount === 0
+      ? 'No replies yet'
+      : `${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}`
+
+  return (
+    <div>
+      <article className="flex gap-3 px-4 py-2">
+        <Avatar avatarDataUrl={avatarDataUrl} message={message} userName={userName} />
+        <div className="min-w-0 max-w-full flex-1 overflow-hidden">
+          <div className="mb-0.5 flex flex-wrap items-baseline gap-2">
+            <span className="text-body font-bold text-ink">{authorLabel(message, userName)}</span>
+            {message.role === 'assistant' && message.model ? (
+              <span className="rounded border border-line bg-surface-muted px-1 py-px font-mono text-meta text-ink-muted">
+                {modelShortName(message.model)}
+              </span>
+            ) : null}
+            <span className="font-mono text-meta text-ink-dim">
+              {formatTime(message.createdAt)}
+            </span>
+            {message.editedAt ? (
+              <span className="font-mono text-meta text-ink-dim">(edited)</span>
+            ) : null}
+          </div>
+          <MessageText content={message.content} streaming={message.status === 'streaming'} />
+        </div>
+      </article>
+      <div className="flex items-center gap-3 px-4 pb-1.5 pt-1 font-mono text-meta text-ink-muted">
+        <span className="whitespace-nowrap">{replyLabel}</span>
+        <span className="h-px flex-1 bg-line" />
+      </div>
+    </div>
+  )
+}
+
 function MessageBlock({
   active,
   compact,
@@ -702,13 +749,9 @@ function ContextMeter({ compact, usage }: { compact?: boolean; usage?: ProviderU
 }
 
 function ConversationComposer({
-  availableModels,
   className,
-  connections,
   disabled,
-  model,
   onChange,
-  onModelChange,
   onSubmit,
   placeholder,
   submitDisabled,
@@ -716,13 +759,9 @@ function ConversationComposer({
   usage,
   value,
 }: {
-  availableModels: EffectiveModel[]
   className?: string
-  connections: ProviderConnection[]
   disabled?: boolean
-  model: string
   onChange: (value: string) => void
-  onModelChange: (value: string) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   placeholder: string
   submitDisabled?: boolean
@@ -769,14 +808,6 @@ function ConversationComposer({
           />
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-line px-1.5 py-1 pl-2">
-          <MiniModelSelect
-            availableModels={availableModels}
-            connections={connections}
-            disabled={disabled}
-            fallbackLabel={(id) => shortNameForModelId(id) ?? id}
-            onChange={onModelChange}
-            value={model}
-          />
           <ContextMeter compact={tone === 'thread'} usage={usage} />
           {/* TODO: reply-in-thread composer mode toggle — see docs/tasks.md (planned)
           {tone === 'parent' ? (
@@ -854,9 +885,62 @@ function ThreadActionsMenu({
   )
 }
 
+function ModelChip({
+  availableModels,
+  connections,
+  disabled,
+  model,
+  onModelChange,
+}: {
+  availableModels: EffectiveModel[]
+  connections: ProviderConnection[]
+  disabled?: boolean
+  model: string
+  onModelChange: (value: string) => void
+}) {
+  return (
+    <MiniModelSelect
+      availableModels={availableModels}
+      connections={connections}
+      disabled={disabled}
+      fallbackLabel={(id) => shortNameForModelId(id) ?? id}
+      onChange={onModelChange}
+      value={model}
+    />
+  )
+}
+
+function AgentIdentityChip({
+  agentId,
+  agentName,
+  modelName,
+}: {
+  agentId: string
+  agentName: string
+  modelName?: string
+}) {
+  return (
+    <Link
+      className="inline-flex h-[22px] min-w-0 items-center gap-1.5 rounded-xs border border-line bg-surface-muted px-1.5 font-mono text-meta text-ink transition hover:bg-canvas"
+      title={`Edit ${agentName}`}
+      to="/settings/agents"
+    >
+      <AgentDot agentId={agentId} displayName={agentName} size="sm" />
+      <span className="truncate font-semibold">{agentName}</span>
+      {modelName ? (
+        <>
+          <span className="text-ink-dim">·</span>
+          <span className="text-ink-dim">{modelName}</span>
+        </>
+      ) : null}
+    </Link>
+  )
+}
+
 function ChannelHeader({
   activeTab,
   branchCount,
+  identityChip,
   isChannel,
   messageCount,
   onOpenChannelSettings,
@@ -870,6 +954,11 @@ function ChannelHeader({
 }: {
   activeTab: ParentTab
   branchCount: number
+  // Kind-specific identity affordance rendered next to the title:
+  //   - model-DM: model picker chip (selector lives here, not in the composer)
+  //   - agent-DM: a static agent name + model badge linking to the agent edit
+  //   - channel: omitted (channel settings entry point is the toolbar button)
+  identityChip?: React.ReactNode
   isChannel: boolean
   messageCount: number
   onOpenChannelSettings?: () => void
@@ -927,6 +1016,7 @@ function ChannelHeader({
             value={draftTitle}
           />
         </div>
+        {identityChip ? <div className="hidden min-w-0 sm:flex">{identityChip}</div> : null}
         <div className="hidden items-baseline gap-3 font-mono text-meta sm:flex">
           <span className="text-ink-dim">
             msgs <strong className="ml-1 text-ink">{messageCount}</strong>
@@ -1070,25 +1160,29 @@ function TurnInProgressBanner({
   isChannel: boolean
   onCancel: () => void
 }) {
-  // Mounted only while a turn for this parent chat is `status='active'`.
-  // The Cancel button maps directly to `interruptActiveTurn`, which closes
-  // the turn with `user-interrupt` and aborts the registered stream
-  // controller (DM path). Channel orchestrator bails on the next loop
-  // iteration via the `liveTurn.status === 'closed'` guard.
+  // A thin status strip above the composer — quiet by default, with a
+  // pulsing dot to signal motion and a low-contrast Stop control. The
+  // original full-width accent banner was too loud for a state the user
+  // can already infer from streaming message text. Mounted only while a
+  // turn for this surface is `status='active'`; Stop maps to
+  // `interruptActiveTurn`, which closes the turn with `user-interrupt`
+  // and aborts the registered stream controller.
   return (
-    <div className="mx-5 mb-1 mt-2 flex items-center gap-2.5 rounded-md border border-accent/30 bg-accent-soft px-3 py-2">
-      <LoaderCircle className="size-4 shrink-0 animate-spin text-accent" />
-      <p className="min-w-0 flex-1 text-small leading-5 text-ink">
-        <span className="font-semibold">
-          {isChannel ? 'Agents are responding…' : 'Streaming a response…'}
-        </span>
-      </p>
+    <div className="mx-5 mb-0.5 mt-1.5 flex items-center gap-2 font-mono text-meta text-ink-muted">
+      <span aria-hidden className="relative inline-flex size-1.5 shrink-0">
+        <span className="absolute inset-0 animate-ping rounded-full bg-accent/70" />
+        <span className="relative inline-flex size-1.5 rounded-full bg-accent" />
+      </span>
+      <span className="min-w-0 flex-1 truncate">
+        {isChannel ? 'agents responding' : 'streaming response'}
+      </span>
       <button
-        className="inline-flex shrink-0 items-center gap-1 rounded border border-line-strong bg-surface px-2.5 py-1 font-mono text-meta font-bold tracking-wide text-ink transition hover:bg-surface-muted"
+        aria-label="Stop response"
+        className="inline-flex shrink-0 items-center gap-1 rounded-xs border border-transparent px-1.5 py-0.5 uppercase tracking-wide text-ink-dim transition hover:border-line hover:text-ink"
         onClick={onCancel}
         type="button"
       >
-        CANCEL
+        Stop
       </button>
     </div>
   )
@@ -1173,6 +1267,18 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
   const pendingMessageJumpRef = useRef<string | null>(null)
 
   const parentChat = useLiveQuery(() => db.parentChats.get(chatId), [chatId], undefined)
+  // Agent-DM identity is rendered in the header as a passive chip. Look up
+  // the bound agent so its current display name (not the snapshot frozen on
+  // each message) drives the chip — keeps it consistent with /settings/agents
+  // edits without rewriting message history.
+  const boundAgent = useLiveQuery(
+    () =>
+      parentChat?.kind === 'dm' && parentChat.agentId
+        ? getAgent(parentChat.agentId)
+        : Promise.resolve(undefined),
+    [parentChat?.id, parentChat?.kind, parentChat?.agentId],
+    undefined as import('@/features/chat/domain').Agent | undefined,
+  )
   const channelParticipants = useLiveQuery(
     () =>
       parentChat?.kind === 'channel'
@@ -1499,6 +1605,29 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
         <ChannelHeader
           activeTab={parentTab}
           branchCount={branchCount}
+          identityChip={
+            parentChat.kind === 'channel'
+              ? undefined
+              : parentChat.agentId && boundAgent
+                ? (
+                  <AgentIdentityChip
+                    agentId={boundAgent.id}
+                    agentName={boundAgent.displayName}
+                    modelName={modelShortName(boundAgent.model ?? null)}
+                  />
+                )
+                : (
+                  <ModelChip
+                    availableModels={availableModels}
+                    connections={providers}
+                    disabled={Boolean(parentChat.archivedAt)}
+                    model={refToPickerValue(parentChat.model)}
+                    onModelChange={(model) =>
+                      void setParentChatModel(parentChat.id, pickerValueToRef(model))
+                    }
+                  />
+                )
+          }
           isChannel={parentChat.kind === 'channel'}
           messageCount={parentMessages.length}
           onOpenChannelSettings={
@@ -1576,24 +1705,23 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
 
         <div className="row-start-4">
           {hasUsableProvider ? null : <ProviderConnectBanner />}
-          {activeTurn ? (
+          {/* Scope the banner to the parent surface — a thread-scoped turn
+              has its own activity in the thread aside and shouldn't double
+              up here. */}
+          {activeTurn &&
+          activeTurn.conversationType === 'parent' &&
+          activeTurn.conversationId === parentChat.id ? (
             <TurnInProgressBanner
               isChannel={parentChat.kind === 'channel'}
               onCancel={() => void interruptActiveTurn(parentChat.id)}
             />
           ) : null}
           <ConversationComposer
-            availableModels={availableModels}
-            connections={providers}
             disabled={
               sendingParent ||
               Boolean(parentChat.archivedAt)
             }
-            model={refToPickerValue(parentChat.model)}
             onChange={(value) => void saveParentDraft(parentChat.id, value)}
-            onModelChange={(model) =>
-              void setParentChatModel(parentChat.id, pickerValueToRef(model))
-            }
             onSubmit={handleParentSubmit}
             placeholder="Ask anything, or /branch to fork this convo..."
             submitDisabled={!hasUsableProvider}
@@ -1610,7 +1738,7 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
             <div className="flex items-center gap-2">
               <GitBranch className="size-3.5 shrink-0 text-accent" />
               <h2 className="min-w-0 flex-1 truncate text-heading font-bold tracking-tight text-ink">
-                {branchLabel(rootMessage)}
+                Branch
               </h2>
               <ThreadActionsMenu
                 disabled={!activeThread}
@@ -1660,6 +1788,25 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
               <span>fork: <span className="text-ink">{rootMessage ? formatTime(rootMessage.createdAt) : 'unknown'}</span></span>
               <span>·</span>
               <span>{threadMessages.length} msgs</span>
+              {/* Model picker for model-DM threads only. Agent-DM and channel
+                  threads draw their model(s) from the agent definition(s) and
+                  do not expose a per-thread override. */}
+              {parentChat.kind === 'dm' && !parentChat.agentId ? (
+                <>
+                  <span>·</span>
+                  <ModelChip
+                    availableModels={availableModels}
+                    connections={providers}
+                    disabled={!activeThread || Boolean(parentChat.archivedAt)}
+                    model={refToPickerValue(activeThread?.model ?? parentChat.model)}
+                    onModelChange={(model) =>
+                      activeThread
+                        ? void setThreadModel(activeThread.id, pickerValueToRef(model))
+                        : undefined
+                    }
+                  />
+                </>
+              ) : null}
             </div>
           </header>
 
@@ -1674,53 +1821,58 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
 
             {threadError ? <EmptyState>{threadError}</EmptyState> : null}
 
-            {threadMessages.length === 0 ? (
+            {activeThread && rootMessage ? (
+              <ThreadRootPreview
+                avatarDataUrl={avatarDataUrl}
+                message={rootMessage}
+                replyCount={threadMessages.length}
+                userName={userName}
+              />
+            ) : null}
+
+            {activeThread && threadMessages.length === 0 ? (
               <EmptyState>
                 No messages in this branch yet. Continue here to keep the side discussion separate from the channel.
               </EmptyState>
-            ) : (
-              threadMessages.map((message) => (
-                <MessageBlock
-                  avatarDataUrl={avatarDataUrl}
-                  active={threadPinnedMessageIds.has(message.id)}
-                  compact
-                  isPinned={threadPinnedMessageIds.has(message.id)}
-                  isSaved={savedMessageIds.has(message.id)}
-                  key={message.id}
-                  message={message}
-                  onOpenThread={(messageId) => void openThreadForMessage(messageId)}
-                  onTogglePin={toggleThreadPin}
-                  onToggleSaved={toggleThreadSaved}
-                  userName={userName}
-                />
-              ))
-            )}
+            ) : null}
+
+            {threadMessages.map((message) => (
+              <MessageBlock
+                avatarDataUrl={avatarDataUrl}
+                active={threadPinnedMessageIds.has(message.id)}
+                compact
+                isPinned={threadPinnedMessageIds.has(message.id)}
+                isSaved={savedMessageIds.has(message.id)}
+                key={message.id}
+                message={message}
+                onOpenThread={(messageId) => void openThreadForMessage(messageId)}
+                onTogglePin={toggleThreadPin}
+                onToggleSaved={toggleThreadSaved}
+                userName={userName}
+              />
+            ))}
           </SmartMessageScrollPane>
 
           <div>
             {hasUsableProvider ? null : <ProviderConnectBanner />}
-            {activeTurn ? (
+            {/* Mirror the parent-surface guard: the thread banner only shows
+                when the active turn is scoped to *this* thread. */}
+            {activeTurn &&
+            activeTurn.conversationType === 'thread' &&
+            activeTurn.conversationId === threadId ? (
               <TurnInProgressBanner
                 isChannel={parentChat.kind === 'channel'}
                 onCancel={() => void interruptActiveTurn(parentChat.id)}
               />
             ) : null}
             <ConversationComposer
-              availableModels={availableModels}
-              connections={providers}
               disabled={
                 !activeThread ||
                 sendingThreadId === activeThread.id ||
                 Boolean(parentChat.archivedAt)
               }
-              model={refToPickerValue(activeThread?.model ?? parentChat.model)}
               onChange={(value) =>
                 activeThread ? void saveThreadDraft(activeThread.id, value) : undefined
-              }
-              onModelChange={(model) =>
-                activeThread
-                  ? void setThreadModel(activeThread.id, pickerValueToRef(model))
-                  : undefined
               }
               onSubmit={handleThreadSubmit}
               placeholder="Continue this branch, or /branch to fork again..."

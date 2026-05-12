@@ -33,6 +33,7 @@ import {
 } from '@/features/chat/turn-lifecycle'
 import type { ModelRef } from '@/features/providers/model-ref'
 import { resolveForSend, type ResolveForSendResult } from '@/features/providers/models-catalog'
+import type { ChatProviderMessage } from '@/features/providers/provider-contract'
 import { getAdapter } from '@/features/providers/registry'
 import { getSettings } from '@/features/settings/settings-repository'
 
@@ -118,56 +119,55 @@ async function resolveSendTarget(modelRef: ModelRef | null): Promise<ResolveForS
   return resolved
 }
 
-export async function sendParentChatTurn(parentChatId: string, prompt: string) {
-  const parentChat = await db.parentChats.get(parentChatId)
-  if (!parentChat) {
-    throw new Error('Conversation not found.')
-  }
-  if (parentChat.archivedAt) {
-    throw new Error('Archived conversations cannot accept new sends.')
-  }
+// Per-surface descriptor. The DM core runs the same lifecycle for parent
+// chats and threads; what differs is where the user/assistant rows live,
+// which draft to clear, how to build the context window, and the
+// thread-only reply-count sync.
+interface DmSendSurface {
+  conversationType: 'parent' | 'thread'
+  conversationId: string
+  parentChatId: string
+  // Conversation channel used by stream-controllers + cancel routing.
+  streamConversationId: string
+  // Inbound context (messages already in the conversation).
+  buildConversation(): Promise<ChatProviderMessage[]>
+  // Persist the draft-sent state for the user message.
+  markDraftSent(prompt: string): Promise<void>
+  // Final summary writeback after the assistant turn closes.
+  finalize(prompt: string, response: string): Promise<void>
+  // Optional thread-only hook to keep root reply counts in sync.
+  syncReplyCount?(): Promise<void>
+  // Cap-hit error wording differs by surface so the user knows whether to
+  // start a new thread vs. a new conversation.
+  contextTooLongMessage: string
+}
 
-  // Channels go through the orchestrator (U7). The user message is
-  // persisted here so callers see consistent ordering; the orchestrator
-  // takes over from openTurn.
-  if (parentChat.kind === 'channel') {
-    const trimmed = prompt.trim()
-    await markParentDraftSent(parentChatId, trimmed)
-    const userMessage = await appendUserMessage({
-      conversationType: 'parent',
-      conversationId: parentChatId,
-      parentChatId,
-      prompt: trimmed,
-      model: undefined,
-    })
-    const { runChannelTurn } = await import('@/features/chat/orchestrator')
-    await runChannelTurn({ chatId: parentChatId, userMessageId: userMessage.id })
-    return
-  }
-
-  const agent = await resolveAgentBinding(parentChat.agentId)
-  const resolved = await resolveSendTarget(agent ? agent.model : parentChat.model ?? null)
-  const snapshot: ModelRef = {
-    providerId: resolved.connection.id,
-    providerKind: resolved.connection.kind,
-    providerModelId: resolved.model.providerModelId,
-  }
-
+async function runDmSend(
+  surface: DmSendSurface,
+  prompt: string,
+  resolved: ResolveForSendResult,
+  snapshot: ModelRef,
+  agent: Agent | null,
+) {
   const trimmed = prompt.trim()
-  await markParentDraftSent(parentChatId, trimmed)
+  await surface.markDraftSent(trimmed)
 
   const userMessage = await appendUserMessage({
-    conversationType: 'parent',
-    conversationId: parentChatId,
-    parentChatId,
+    conversationType: surface.conversationType,
+    conversationId: surface.conversationId,
+    parentChatId: surface.parentChatId,
     prompt: trimmed,
     model: snapshot,
   })
 
+  if (surface.syncReplyCount) {
+    await surface.syncReplyCount()
+  }
+
   const assistantMessage = await createAssistantMessage({
-    conversationType: 'parent',
-    conversationId: parentChatId,
-    parentChatId,
+    conversationType: surface.conversationType,
+    conversationId: surface.conversationId,
+    parentChatId: surface.parentChatId,
     model: snapshot,
     ...(agent
       ? { agentId: agent.id, agentSnapshot: snapshotForAgent(agent, snapshot) }
@@ -175,9 +175,9 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
   })
 
   const turn = await openTurn({
-    parentChatId,
-    conversationType: 'parent',
-    conversationId: parentChatId,
+    parentChatId: surface.parentChatId,
+    conversationType: surface.conversationType,
+    conversationId: surface.conversationId,
     userMessageId: userMessage.id,
   })
   const { attempt, controller: attemptController } = await openAttempt({
@@ -186,20 +186,18 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
     agentId: agent?.id,
     model: snapshot,
   })
-  // Keep the legacy registerStreamController hook so the existing
-  // user-cancel UI keeps working until U10 adopts the lifecycle directly.
-  const legacyController = registerStreamController(parentChatId)
-  // Link the two so aborting either aborts both.
-  attemptController.signal.addEventListener('abort', () => legacyController.abort())
-  legacyController.signal.addEventListener('abort', () => attemptController.abort())
+  // Register the attempt's controller as THE active stream for this
+  // conversation. Callers that can't see turn ids (deleteProvider's
+  // abortAllStreams, providers-repository) can still cancel us via the
+  // registry; in-band cancel goes through interruptActiveTurn → closeTurn
+  // → controller.abort().
+  registerStreamController(surface.streamConversationId, attemptController)
 
   try {
     await markAttemptStreaming(attempt.id)
-    const conversation = await getParentConversation(parentChatId)
+    const conversation = await surface.buildConversation()
     if (estimateContextSize(conversation) > APPROX_CONTEXT_CHAR_LIMIT) {
-      throw new Error(
-        'This conversation is too long for the current browser-side safety limit. Start a new conversation or continue in a thread.',
-      )
+      throw new Error(surface.contextTooLongMessage)
     }
 
     const transport = withAgentSystemPrompt(agent, conversation)
@@ -209,9 +207,9 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
 
     const onUnawaitedWriteError = (err: unknown) => {
       // Surface QuotaExceededError (or any persistence failure) by aborting
-      // the stream — the AbortError path below converts it to a failed message
-      // status rather than leaving it stuck in 'streaming'.
-      if (!legacyController.signal.aborted) legacyController.abort(err)
+      // the stream — the AbortError path below converts it to a failed
+      // message status rather than leaving it stuck in 'streaming'.
+      if (!attemptController.signal.aborted) attemptController.abort(err)
     }
 
     const response = await adapter.streamChat(resolved.connection, snapshot, {
@@ -251,25 +249,80 @@ export async function sendParentChatTurn(parentChatId: string, prompt: string) {
       providerRequestId: response.id,
       usage: response.usage,
     })
-    await finalizeParentChatAfterSend(parentChatId, trimmed, finalContent)
+    await surface.finalize(trimmed, finalContent)
     await closeTurn(turn.id, 'complete')
   } catch (error) {
-    if (isAbortError(error) || legacyController.signal.aborted) {
+    if (isAbortError(error) || attemptController.signal.aborted) {
       await failMessage(assistantMessage.id, 'Request cancelled.', 'Cancelled')
       await cancelAttempt(attempt.id)
       await closeTurn(turn.id, 'user-interrupt')
-      await finalizeParentChatAfterSend(parentChatId, trimmed, 'Request cancelled.')
+      await surface.finalize(trimmed, 'Request cancelled.')
       return
     }
     const message = normalizeErrorMessage(error)
     await failMessage(assistantMessage.id, `Request failed: ${message}`, message)
     await failAttempt(attempt.id, message)
     await closeTurn(turn.id, 'error')
-    await finalizeParentChatAfterSend(parentChatId, trimmed, `Request failed: ${message}`)
+    await surface.finalize(trimmed, `Request failed: ${message}`)
     throw new Error(message)
   } finally {
-    clearStreamController(parentChatId, legacyController)
+    clearStreamController(surface.streamConversationId, attemptController)
   }
+}
+
+export async function sendParentChatTurn(parentChatId: string, prompt: string) {
+  const parentChat = await db.parentChats.get(parentChatId)
+  if (!parentChat) {
+    throw new Error('Conversation not found.')
+  }
+  if (parentChat.archivedAt) {
+    throw new Error('Archived conversations cannot accept new sends.')
+  }
+
+  // Channels go through the orchestrator (U7). The user message is
+  // persisted here so callers see consistent ordering; the orchestrator
+  // takes over from openTurn.
+  if (parentChat.kind === 'channel') {
+    const trimmed = prompt.trim()
+    await markParentDraftSent(parentChatId, trimmed)
+    const userMessage = await appendUserMessage({
+      conversationType: 'parent',
+      conversationId: parentChatId,
+      parentChatId,
+      prompt: trimmed,
+      model: undefined,
+    })
+    const { runChannelTurn } = await import('@/features/chat/orchestrator')
+    await runChannelTurn({ chatId: parentChatId, userMessageId: userMessage.id })
+    return
+  }
+
+  const agent = await resolveAgentBinding(parentChat.agentId)
+  const resolved = await resolveSendTarget(agent ? agent.model : parentChat.model ?? null)
+  const snapshot: ModelRef = {
+    providerId: resolved.connection.id,
+    providerKind: resolved.connection.kind,
+    providerModelId: resolved.model.providerModelId,
+  }
+
+  await runDmSend(
+    {
+      conversationType: 'parent',
+      conversationId: parentChatId,
+      parentChatId,
+      streamConversationId: parentChatId,
+      buildConversation: () => getParentConversation(parentChatId),
+      markDraftSent: (trimmed) => markParentDraftSent(parentChatId, trimmed),
+      finalize: (trimmed, response) =>
+        finalizeParentChatAfterSend(parentChatId, trimmed, response),
+      contextTooLongMessage:
+        'This conversation is too long for the current browser-side safety limit. Start a new conversation or continue in a thread.',
+    },
+    prompt,
+    resolved,
+    snapshot,
+    agent,
+  )
 }
 
 export async function sendThreadTurn(threadId: string, prompt: string) {
@@ -285,8 +338,34 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     throw new Error('Archived conversations cannot accept new sends.')
   }
 
-  // Thread inherits agent binding from its parent in v0 (agent-DM threads).
-  // U11 lands the full participant-snapshot inheritance for channels.
+  // Channel threads go through the orchestrator. The thread carries its own
+  // snapshot of participants (U11) — fan-out, decide-to-respond, and mention
+  // parsing all run against that snapshot. This mirrors the parent-channel
+  // branch in sendParentChatTurn and is what closes the "thread started from
+  // an agent message in a group chat" gap.
+  if (parentChat.kind === 'channel') {
+    const trimmed = prompt.trim()
+    await markThreadDraftSent(threadId, thread.parentChatId, trimmed)
+    const userMessage = await appendUserMessage({
+      conversationType: 'thread',
+      conversationId: threadId,
+      parentChatId: thread.parentChatId,
+      prompt: trimmed,
+      model: undefined,
+    })
+    await syncRootReplyCountForThread(threadId)
+    const { runChannelTurn } = await import('@/features/chat/orchestrator')
+    await runChannelTurn({
+      chatId: thread.parentChatId,
+      threadId,
+      userMessageId: userMessage.id,
+    })
+    return
+  }
+
+  // Thread inherits agent binding from its parent (agent-DM threads). U11
+  // lands full participant-snapshot inheritance for channels via the
+  // orchestrator branch above.
   const agent = await resolveAgentBinding(parentChat.agentId)
   const resolved = await resolveSendTarget(
     agent ? agent.model : thread.model ?? parentChat.model ?? null,
@@ -297,121 +376,24 @@ export async function sendThreadTurn(threadId: string, prompt: string) {
     providerModelId: resolved.model.providerModelId,
   }
 
-  const trimmed = prompt.trim()
-  await markThreadDraftSent(threadId, thread.parentChatId, trimmed)
-
-  const userMessage = await appendUserMessage({
-    conversationType: 'thread',
-    conversationId: threadId,
-    parentChatId: thread.parentChatId,
-    prompt: trimmed,
-    model: snapshot,
-  })
-
-  await syncRootReplyCountForThread(threadId)
-
-  const assistantMessage = await createAssistantMessage({
-    conversationType: 'thread',
-    conversationId: threadId,
-    parentChatId: thread.parentChatId,
-    model: snapshot,
-    ...(agent
-      ? { agentId: agent.id, agentSnapshot: snapshotForAgent(agent, snapshot) }
-      : {}),
-  })
-
-  await syncRootReplyCountForThread(threadId)
-
-  const turn = await openTurn({
-    parentChatId: thread.parentChatId,
-    conversationType: 'thread',
-    conversationId: threadId,
-    userMessageId: userMessage.id,
-  })
-  const { attempt, controller: attemptController } = await openAttempt({
-    turnId: turn.id,
-    assistantMessageId: assistantMessage.id,
-    agentId: agent?.id,
-    model: snapshot,
-  })
-  const legacyController = registerStreamController(threadId)
-  attemptController.signal.addEventListener('abort', () => legacyController.abort())
-  legacyController.signal.addEventListener('abort', () => attemptController.abort())
-
-  try {
-    await markAttemptStreaming(attempt.id)
-    const conversation = await getThreadConversation(threadId)
-    if (estimateContextSize(conversation) > APPROX_CONTEXT_CHAR_LIMIT) {
-      throw new Error(
+  await runDmSend(
+    {
+      conversationType: 'thread',
+      conversationId: threadId,
+      parentChatId: thread.parentChatId,
+      streamConversationId: threadId,
+      buildConversation: () => getThreadConversation(threadId),
+      markDraftSent: (trimmed) =>
+        markThreadDraftSent(threadId, thread.parentChatId, trimmed),
+      finalize: (trimmed, response) =>
+        finalizeThreadAfterSend(threadId, thread.parentChatId, trimmed, response),
+      syncReplyCount: () => syncRootReplyCountForThread(threadId),
+      contextTooLongMessage:
         'This thread is too long for the current browser-side safety limit. Start a new thread from a narrower message or open a fresh conversation.',
-      )
-    }
-
-    const transport = withAgentSystemPrompt(agent, conversation)
-
-    let assistantContent = ''
-    const adapter = getAdapter(resolved.connection.kind)
-
-    const onUnawaitedWriteError = (err: unknown) => {
-      if (!legacyController.signal.aborted) legacyController.abort(err)
-    }
-
-    const response = await adapter.streamChat(resolved.connection, snapshot, {
-      messages: transport,
-      signal: attemptController.signal,
-      onChunk: (chunk) => {
-        assistantContent += chunk
-        attemptStillCurrent(attempt.id)
-          .then((ok) => {
-            if (!ok) return
-            return updateMessage(assistantMessage.id, {
-              content: assistantContent,
-              status: 'streaming',
-            })
-          })
-          .catch(onUnawaitedWriteError)
-      },
-      onMessageId: (id) => {
-        attemptStillCurrent(attempt.id)
-          .then((ok) => {
-            if (!ok) return
-            return updateMessage(assistantMessage.id, { providerRequestId: id })
-          })
-          .catch(onUnawaitedWriteError)
-      },
-    })
-
-    const finalContent = response.content.trim() || 'The provider returned an empty response.'
-    await completeMessage(assistantMessage.id, finalContent, response.usage)
-    if (response.id) {
-      await updateMessage(assistantMessage.id, { providerRequestId: response.id })
-    }
-    await completeAttempt(attempt.id, {
-      providerRequestId: response.id,
-      usage: response.usage,
-    })
-    await finalizeThreadAfterSend(threadId, thread.parentChatId, trimmed, finalContent)
-    await closeTurn(turn.id, 'complete')
-  } catch (error) {
-    if (isAbortError(error) || legacyController.signal.aborted) {
-      await failMessage(assistantMessage.id, 'Request cancelled.', 'Cancelled')
-      await cancelAttempt(attempt.id)
-      await closeTurn(turn.id, 'user-interrupt')
-      await finalizeThreadAfterSend(threadId, thread.parentChatId, trimmed, 'Request cancelled.')
-      return
-    }
-    const message = normalizeErrorMessage(error)
-    await failMessage(assistantMessage.id, `Request failed: ${message}`, message)
-    await failAttempt(attempt.id, message)
-    await closeTurn(turn.id, 'error')
-    await finalizeThreadAfterSend(
-      threadId,
-      thread.parentChatId,
-      trimmed,
-      `Request failed: ${message}`,
-    )
-    throw new Error(message)
-  } finally {
-    clearStreamController(threadId, legacyController)
-  }
+    },
+    prompt,
+    resolved,
+    snapshot,
+    agent,
+  )
 }

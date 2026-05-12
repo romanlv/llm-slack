@@ -8,8 +8,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createAgent } from '@/features/agents/agents-repository'
 import { db } from '@/features/chat/database'
+import { createProvider } from '@/features/providers/providers-repository'
 import {
-  addChannelParticipant,
   createChannel,
   listChannelParticipants,
 } from '@/features/chat/repository'
@@ -47,7 +47,7 @@ async function seedChannelWithAgents() {
 
 describe('ChannelParticipantsPanel', () => {
   it('lists current participants with their mode and removes a participant when the trash button is clicked', async () => {
-    const { channel, a, b } = await seedChannelWithAgents()
+    const { channel, b } = await seedChannelWithAgents()
     render(<ChannelParticipantsPanel chatId={channel.id} />)
 
     expect(await screen.findByText('Alpha')).toBeInTheDocument()
@@ -60,7 +60,6 @@ describe('ChannelParticipantsPanel', () => {
       const participants = await listChannelParticipants(channel.id)
       expect(participants.map((p) => p.agentId)).toEqual([b.id])
     })
-    void a
   })
 
   it('changes a participant mode through the inline select', async () => {
@@ -105,12 +104,42 @@ describe('ChannelParticipantsPanel', () => {
     })
   })
 
+  it('creates a new agent via the inline editor and adds it to the channel', async () => {
+    const { channel } = await seedChannelWithAgents()
+    // The agent editor needs a connected provider so its model dropdown
+    // has something to pick. The bundled OpenRouter catalog supplies the
+    // models without an extra fetch.
+    await createProvider({ kind: 'openrouter', label: 'OR', apiKey: 'k' })
+
+    render(<ChannelParticipantsPanel chatId={channel.id} />)
+
+    // Open the editor via the secondary "Create new agent" affordance that
+    // sits below the existing-agent picker.
+    await screen.findByText('Alpha')
+    await userEvent.click(
+      screen.getAllByRole('button', { name: /create new agent/i })[0]!,
+    )
+
+    // Fill the editor and submit. The editor renders in a portal but still
+    // queryable from screen.
+    const nameInput = await screen.findByLabelText(/display name/i)
+    await userEvent.type(nameInput, 'Delta')
+    await userEvent.click(screen.getByRole('button', { name: /create agent/i }))
+
+    await waitFor(async () => {
+      const participants = await listChannelParticipants(channel.id)
+      const agents = await db.agents.toArray()
+      const delta = agents.find((a) => a.displayName === 'Delta')
+      expect(delta).toBeDefined()
+      expect(participants.map((p) => p.agentId)).toContain(delta!.id)
+    })
+  })
+
   it('renders a "Removed from library" hint when a participant references a deleted agent', async () => {
     const channel = await createChannel({ title: 'orphans' })
-    // Insert a participant row pointing at an agent that does not exist.
-    // We bypass addChannelParticipant on purpose so the orphan condition
-    // can be tested in isolation.
-    void addChannelParticipant
+    // Bypass addChannelParticipant to seed the orphan condition directly:
+    // its validator would reject a missing-agent row, so we write to Dexie
+    // straight to reproduce the runtime state we want to render.
     await db.chatParticipants.add({
       id: 'orphan-1',
       chatId: channel.id,

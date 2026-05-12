@@ -9,6 +9,7 @@ import type {
   ChannelParticipant,
   ChannelSettings,
   ChatMessage,
+  ConversationType,
   ParticipationMode,
 } from '@/features/chat/domain'
 import { DEFAULT_CHANNEL_SETTINGS } from '@/features/chat/domain'
@@ -19,6 +20,7 @@ import {
   failMessage,
   getChannelSettings,
   getParentConversation,
+  getThreadConversation,
   listChannelParticipants,
 } from '@/features/chat/repository'
 import {
@@ -53,6 +55,14 @@ import { getSettings } from '@/features/settings/settings-repository'
 export interface RunChannelTurnInput {
   chatId: string
   userMessageId: string
+  /**
+   * Optional thread scope. When set, the orchestrator runs inside the thread:
+   * participants come from the thread's snapshotted `chatParticipants` rows
+   * (U11), context comes from `getThreadConversation`, and fan-out replies
+   * are persisted on the thread. When omitted, behaviour matches the
+   * original parent-channel turn.
+   */
+  threadId?: string
 }
 
 interface CandidateAgent {
@@ -71,10 +81,18 @@ export async function runChannelTurn(input: RunChannelTurnInput): Promise<void> 
     throw new Error(`User message "${input.userMessageId}" missing.`)
   }
 
+  const isInsideThread = Boolean(input.threadId)
+  const conversationType: ConversationType = isInsideThread ? 'thread' : 'parent'
+  const conversationId = input.threadId ?? input.chatId
+  // Channel settings always live on the parent channel — threads inherit caps
+  // and allowAgentThreading via the parent row. Participants, however, are
+  // read from the conversation scope so the U11 thread snapshot is honoured.
+  const participantScopeId = conversationId
+
   const turn = await openTurn({
     parentChatId: input.chatId,
-    conversationType: 'parent',
-    conversationId: input.chatId,
+    conversationType,
+    conversationId,
     userMessageId: input.userMessageId,
   })
 
@@ -85,7 +103,7 @@ export async function runChannelTurn(input: RunChannelTurnInput): Promise<void> 
     updatedAt: 0,
   }
 
-  const participants = await listChannelParticipants(input.chatId)
+  const participants = await listChannelParticipants(participantScopeId)
   const agentsById = new Map<string, Agent>()
   for (const p of participants) {
     const agent = await getAgent(p.agentId)
@@ -134,7 +152,9 @@ export async function runChannelTurn(input: RunChannelTurnInput): Promise<void> 
             .filter((a): a is Agent => !!a),
           candidate: c,
           triggeringEvent,
-          isInsideThread: false,
+          isInsideThread,
+          conversationType,
+          conversationId,
         }),
       ),
     )
@@ -215,6 +235,8 @@ interface RunOneAttemptInput {
   candidate: CandidateAgent
   triggeringEvent: ChatMessage
   isInsideThread: boolean
+  conversationType: ConversationType
+  conversationId: string
 }
 
 interface RunOneAttemptResult {
@@ -242,24 +264,25 @@ async function runOneAttempt(input: RunOneAttemptInput): Promise<RunOneAttemptRe
   }
 
   // The assistant message row is created *after* we know the agent
-  // decided to respond. This matches the plan's "silence writes no row"
-  // semantic and keeps every assistantMessageId on an attempt resolvable.
-  // For real streaming, the row would be created once a chunk arrives
-  // confirming non-silence; v0's fake harness emits content in one chunk
-  // so we buffer and decide at the end.
+  // decided to respond. The attempt starts with an empty assistantMessageId
+  // and either (a) gets it patched when a real message row is created, or
+  // (b) stays empty + transitions to 'decided-silent'. The DB-invariants
+  // checker treats empty assistantMessageId as "no row" by design, so this
+  // avoids the previous 'pending'/'' tombstone shuffle.
   let assistantMessageId: string | undefined
   const { attempt, controller } = await openAttempt({
     turnId: input.turnId,
-    // Placeholder — patched below when the row is created. We delete the
-    // attempt instead if it stays silent.
-    assistantMessageId: 'pending',
+    assistantMessageId: '',
     agentId: candidate.agent.id,
     model: snapshot,
   })
 
   try {
     await markAttemptStreaming(attempt.id)
-    const conversation = await getParentConversation(input.triggeringEvent.parentChatId)
+    const conversation =
+      input.conversationType === 'thread'
+        ? await getThreadConversation(input.conversationId)
+        : await getParentConversation(input.triggeringEvent.parentChatId)
     const systemPrompt = buildDecideSystemPrompt({
       channelTitle,
       participants: input.participantsForRoster,
@@ -285,16 +308,15 @@ async function runOneAttempt(input: RunOneAttemptInput): Promise<RunOneAttemptRe
 
     const decision = parseAgentResponse(response.content)
     if (!decision.respond) {
-      // The attempt's assistantMessageId placeholder is replaced with the
-      // tombstone "" so the invariant treats it as "no message row".
-      await db.providerRequestAttempts.update(attempt.id, { assistantMessageId: '' })
+      // Silence keeps the attempt's empty assistantMessageId — no row to
+      // patch, no tombstone. The invariants checker recognises this.
       await markAttemptDecidedSilent(attempt.id)
       return { agentId: candidate.agent.id }
     }
 
     const assistant = await createAssistantMessage({
-      conversationType: 'parent',
-      conversationId: input.triggeringEvent.parentChatId,
+      conversationType: input.conversationType,
+      conversationId: input.conversationId,
       parentChatId: input.triggeringEvent.parentChatId,
       model: snapshot,
       agentId: candidate.agent.id,

@@ -269,34 +269,11 @@ export class LlmSlackDatabase extends Dexie {
     // 'streaming' rows are not migrated; recovery for them is tracked
     // separately (P0c.3).
     //
-    // v9 (U11) is a *logical* extension only: chatParticipants.chatId now
-    // also accepts threads.id, populated when a thread roots off a
-    // channel. The store shape is identical; the index already covers
-    // both cases. We still bump the version so the migration test pins
-    // the boundary and assertChannelInvariants can branch on it.
+    // chatParticipants.chatId is allowed to point at either parentChats.id
+    // (a channel) or threads.id (a thread under a channel — U11). The
+    // store shape doesn't change for the thread case; assertChannelChat
+    // and the DB invariants checker branch on the kind at write/read time.
     this.version(8)
-      .stores({
-        parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
-        threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
-        messages:
-          'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
-        pinnedMessages:
-          'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
-        savedMessages:
-          'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
-        providers: 'id, kind, createdAt',
-        modelOverrides: 'id, providerId, &[providerId+providerModelId]',
-        agents: 'id, createdAt, updatedAt',
-        chatParticipants:
-          'id, chatId, agentId, [chatId+sortKey], &[chatId+agentId]',
-        channelSettings: 'id',
-        turns: 'id, parentChatId, conversationId, status, [conversationId+createdAt]',
-        providerRequestAttempts:
-          'id, turnId, assistantMessageId, agentId, [turnId+attemptNumber]',
-        settings: 'id',
-      })
-
-    this.version(9)
       .stores({
         parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
         threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',

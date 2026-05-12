@@ -16,6 +16,8 @@ import {
 } from '@/features/chat/repository'
 import { cn } from '@/lib/utils'
 
+import { ParticipationModeSelect } from './participation-mode-select'
+
 type NewChatModalProps = {
   onOpenChange: (open: boolean) => void
   open: boolean
@@ -411,7 +413,7 @@ function ChannelTab({
                     </div>
                   </button>
                   {selected ? (
-                    <ModeSelect
+                    <ParticipationModeSelect
                       onChange={(mode) => setMode(agent.id, mode)}
                       value={selectedMode!}
                     />
@@ -445,21 +447,3 @@ function ChannelTab({
   )
 }
 
-function ModeSelect({
-  onChange,
-  value,
-}: {
-  onChange: (mode: ParticipationMode) => void
-  value: ParticipationMode
-}) {
-  return (
-    <select
-      className="h-8 rounded-md border border-line bg-surface px-2 font-mono text-meta text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      onChange={(event) => onChange(event.target.value as ParticipationMode)}
-      value={value}
-    >
-      <option value="auto-decide">auto-decide</option>
-      <option value="mention-only">mention-only</option>
-    </select>
-  )
-}
