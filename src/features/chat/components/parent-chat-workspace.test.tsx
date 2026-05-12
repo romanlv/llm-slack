@@ -510,6 +510,151 @@ describe('ParentChatWorkspace', () => {
     expect(screen.queryByRole('button', { name: /stop response/i })).toBeNull()
   })
 
+  it('at depth 2 puts the parent thread in the main column and the leaf on the side', async () => {
+    // Channel → thread A → thread B (leaf). Main should render thread A's
+    // messages; side should render thread B's. Without this fix main would
+    // still show the root channel even though the breadcrumb showed depth 2.
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'channel-root', content: 'channel says hi', directReplyCount: 1 }))
+    await db.threads.add(
+      thread({ id: 'thread-a', rootMessageId: 'channel-root', parentChatId: 'parent-1' }),
+    )
+    await db.messages.add(
+      message({
+        id: 'thread-a-msg',
+        conversationType: 'thread',
+        conversationId: 'thread-a',
+        content: 'inside thread A',
+        createdAt: 2,
+        directReplyCount: 1,
+      }),
+    )
+    await db.threads.add(
+      thread({
+        id: 'thread-b',
+        rootMessageId: 'thread-a-msg',
+        parentChatId: 'parent-1',
+        parentThreadId: 'thread-a',
+        depth: 2,
+      }),
+    )
+    await db.messages.add(
+      message({
+        id: 'thread-b-msg',
+        conversationType: 'thread',
+        conversationId: 'thread-b',
+        content: 'inside thread B',
+        createdAt: 3,
+      }),
+    )
+
+    render(<ParentChatWorkspace chatId="parent-1" threadId="thread-b" />)
+
+    // Both visible thread surfaces render their messages — main shows
+    // thread A's content (its root preview "channel says hi" + its message
+    // "inside thread A"); side shows thread B ("inside thread B").
+    await screen.findAllByText('inside thread A')
+    expect(await screen.findByText('inside thread B')).toBeInTheDocument()
+    // Channel-only chrome should be absent because the main column is no
+    // longer the channel. The Channel settings button is the cleanest
+    // signal — it appears only on channel-kind main panes.
+    expect(screen.queryByRole('button', { name: /channel settings/i })).toBeNull()
+  })
+
+  it('pops the side branch to its parent thread on close at depth 2', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'channel-root', content: 'root', directReplyCount: 1 }))
+    await db.threads.add(
+      thread({ id: 'thread-a', rootMessageId: 'channel-root', parentChatId: 'parent-1' }),
+    )
+    await db.messages.add(
+      message({
+        id: 'thread-a-msg',
+        conversationType: 'thread',
+        conversationId: 'thread-a',
+        content: 'in A',
+        createdAt: 2,
+        directReplyCount: 1,
+      }),
+    )
+    await db.threads.add(
+      thread({
+        id: 'thread-b',
+        rootMessageId: 'thread-a-msg',
+        parentChatId: 'parent-1',
+        parentThreadId: 'thread-a',
+        depth: 2,
+      }),
+    )
+
+    render(<ParentChatWorkspace chatId="parent-1" threadId="thread-b" />)
+
+    await screen.findAllByText('in A')
+    // Close the side branch — at depth 2 this pops to thread A, not to the
+    // root channel. Matches "main = parent of side" as the user walks out.
+    const closeButtons = screen.getAllByRole('button', { name: /close branch/i })
+    await userEvent.click(closeButtons[closeButtons.length - 1])
+
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/chat/$chatId/thread/$threadId',
+      params: { chatId: 'parent-1', threadId: 'thread-a' },
+    })
+  })
+
+  it('shows an L{depth} hint on branches deeper than 1 and omits it at depth 1', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'root', content: 'root', directReplyCount: 1 }))
+    await db.threads.add(thread({ id: 'thread-a', rootMessageId: 'root' }))
+    await db.messages.add(
+      message({
+        id: 'thread-a-msg',
+        conversationType: 'thread',
+        conversationId: 'thread-a',
+        content: 'in A',
+        createdAt: 2,
+        directReplyCount: 1,
+      }),
+    )
+    await db.threads.add(
+      thread({
+        id: 'thread-b',
+        rootMessageId: 'thread-a-msg',
+        parentChatId: 'parent-1',
+        parentThreadId: 'thread-a',
+        depth: 2,
+      }),
+    )
+
+    // Depth-1 view: side pane is thread-a (depth 1) — no L hint.
+    const { rerender } = render(
+      <ParentChatWorkspace chatId="parent-1" threadId="thread-a" />,
+    )
+    await screen.findByText('in A')
+    expect(screen.queryByText(/^L\d+$/)).toBeNull()
+
+    // Depth-2 view: both panes are threads. Main = L1 (thread-a, no hint),
+    // side = L2 (thread-b, hint present). Exactly one badge.
+    rerender(<ParentChatWorkspace chatId="parent-1" threadId="thread-b" />)
+    expect(await screen.findByText('L2')).toBeInTheDocument()
+    expect(screen.queryByText('L1')).toBeNull()
+  })
+
+  it('pops the side branch to the channel on close at depth 1', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'root', content: 'root', directReplyCount: 1 }))
+    await db.threads.add(thread({ id: 'thread-1', rootMessageId: 'root' }))
+
+    render(<ParentChatWorkspace chatId="parent-1" threadId="thread-1" />)
+
+    const closeBtn = await screen.findByRole('button', { name: /close branch/i })
+    await userEvent.click(closeBtn)
+
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/chat/$chatId',
+      params: { chatId: 'parent-1' },
+    })
+  })
+
   it('shows the Channel settings affordance only on channel-kind chats', async () => {
     // First: a DM chat. The button should not render.
     await db.parentChats.add(parentChat())

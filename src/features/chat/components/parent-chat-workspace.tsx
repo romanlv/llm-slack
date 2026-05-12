@@ -43,7 +43,7 @@ import {
   listPinnedMessagesForParentChat,
   getThreadAncestorChain,
   getOrCreateThreadForMessage,
-  getRootMessageForThread,
+  loadConversationPanes,
   previewText,
   renameParentChat,
   saveParentDraft,
@@ -54,7 +54,9 @@ import {
   toggleSavedMessage,
   toggleStarParentChat,
   type ChatMessage,
+  type ConversationPanes,
   type ConversationThread,
+  type ParentChat,
   type PinnedMessageWithMessage,
   type ProviderUsage,
   type ThreadAncestor,
@@ -96,6 +98,15 @@ function formatTime(timestamp: number) {
     hour: 'numeric',
     minute: '2-digit',
   }).format(timestamp)
+}
+
+// Stable identity for the scroll pane's content so it knows when to follow a
+// growing tail of messages. Each entry contributes id/length/status — enough
+// to detect both new messages and in-place streaming growth.
+function scrollContentKeyFor(messages: ChatMessage[]) {
+  return messages
+    .map((message) => `${message.id}:${message.content.length}:${message.status}`)
+    .join('|')
 }
 
 function modelShortName(model?: ModelRef | null) {
@@ -1255,18 +1266,264 @@ function SmartMessageScrollPane({
   )
 }
 
+// The "Branch" title bar shared by <ThreadPane> and <MissingBranchPlaceholder>.
+// Both surfaces label themselves the same way; only the trailing controls
+// (actions menu, close button, fork meta) differ. At depth ≥ 2 a faint
+// `L{depth}` chip hints at how nested the user is — quiet enough not to
+// compete with the breadcrumb, present enough to read at a glance.
+function ThreadPaneTitleBar({ children, depth }: { children?: ReactNode; depth?: number }) {
+  return (
+    <div className="flex items-center gap-2">
+      <GitBranch className="size-3.5 shrink-0 text-accent" />
+      <h2 className="text-heading font-bold tracking-tight text-ink">Branch</h2>
+      {depth && depth >= 2 ? (
+        <span
+          className="font-mono text-meta font-semibold text-ink-dim"
+          title={`Nested ${depth} levels deep`}
+        >
+          L{depth}
+        </span>
+      ) : null}
+      <div className="min-w-0 flex-1" />
+      {children}
+    </div>
+  )
+}
+
+function ThreadPaneCloseButton({ onClose }: { onClose: () => void }) {
+  return (
+    <button
+      aria-label="Close branch"
+      className="rounded p-0.5 leading-none text-ink-muted transition hover:text-ink"
+      onClick={onClose}
+      type="button"
+    >
+      <X className="size-4" />
+    </button>
+  )
+}
+
+// Rendered in place of <ThreadPane> when the URL names a thread we can't
+// resolve locally. Preserves the disabled-composer affordance so users see
+// a recognizable thread surface and can dismiss back to the channel.
+function MissingBranchPlaceholder({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-surface">
+      <header className="border-b border-line px-3.5 pb-2 pt-2.5">
+        <ThreadPaneTitleBar>
+          <ThreadPaneCloseButton onClose={onClose} />
+        </ThreadPaneTitleBar>
+      </header>
+      <div className="min-h-0 overflow-y-auto py-2">
+        <EmptyState>This branch does not exist in local storage.</EmptyState>
+      </div>
+      <ConversationComposer
+        disabled
+        onChange={() => undefined}
+        onSubmit={(event) => event.preventDefault()}
+        placeholder="Continue this branch, or /branch to fork again..."
+        submitDisabled
+        tone="thread"
+        value=""
+      />
+    </div>
+  )
+}
+
+type ThreadPaneTone = 'main' | 'side'
+
+// One thread surface — header, root preview, message list, and composer.
+// Reused for the right-side aside (tone='side') and, at depth ≥ 2, for the
+// main column (tone='main'). The two tones differ only in cosmetics (close
+// button, message padding, header chrome); all data flow is identical.
+function ThreadPane({
+  activeTurn,
+  availableModels,
+  avatarDataUrl,
+  draft,
+  error,
+  hasUsableProvider,
+  messages,
+  onCancelTurn,
+  onClose,
+  onDelete,
+  onDraftChange,
+  onModelChange,
+  onOpenChildThread,
+  onSubmit,
+  onTogglePin,
+  onToggleSaved,
+  pinnedMessageIds,
+  providers,
+  refToPickerValue,
+  rootChat,
+  rootMessage,
+  savedMessageIds,
+  scrollContentKey,
+  sending,
+  showModelPicker,
+  thread,
+  tone,
+  userName,
+  usage,
+}: {
+  activeTurn?: Turn
+  availableModels: EffectiveModel[]
+  avatarDataUrl?: string
+  draft: string
+  error: string | null
+  hasUsableProvider: boolean
+  messages: ChatMessage[]
+  onCancelTurn: () => void
+  onClose?: () => void
+  onDelete: () => void | Promise<void>
+  onDraftChange: (value: string) => void
+  onModelChange: (value: string) => void
+  onOpenChildThread: (messageId: string) => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onTogglePin: (messageId: string) => Promise<void>
+  onToggleSaved: (messageId: string) => Promise<void>
+  pinnedMessageIds: Set<string>
+  providers: ProviderConnection[]
+  refToPickerValue: (ref: ModelRef | null | undefined) => string
+  rootChat: ParentChat
+  rootMessage: ChatMessage
+  savedMessageIds: Set<string>
+  scrollContentKey: string
+  sending: boolean
+  showModelPicker: boolean
+  thread: ConversationThread
+  tone: ThreadPaneTone
+  userName: string
+  usage?: ProviderUsage
+}) {
+  const archived = Boolean(rootChat.archivedAt)
+  // Active-turn banner is scoped per-conversation: only show this pane's
+  // banner if the active turn is the one streaming into this thread.
+  const turnInThisThread =
+    activeTurn?.conversationType === 'thread' && activeTurn.conversationId === thread.id
+
+  return (
+    <div
+      className={cn(
+        'grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-surface',
+      )}
+    >
+      <header className="border-b border-line px-3.5 pb-2 pt-2.5">
+        <ThreadPaneTitleBar depth={thread.depth}>
+          <ThreadActionsMenu onDelete={onDelete} />
+          {onClose ? <ThreadPaneCloseButton onClose={onClose} /> : null}
+        </ThreadPaneTitleBar>
+        <div className="mt-1.5 flex items-center gap-2 font-mono text-meta text-ink-muted">
+          <span>
+            fork: <span className="text-ink">{formatTime(rootMessage.createdAt)}</span>
+          </span>
+          <span>·</span>
+          <span>{messages.length} msgs</span>
+          {/* Model picker for model-DM threads only. Agent-DM and channel
+              threads draw their model(s) from the agent definition(s) and
+              do not expose a per-thread override. */}
+          {showModelPicker ? (
+            <>
+              <span>·</span>
+              <ModelChip
+                availableModels={availableModels}
+                connections={providers}
+                disabled={archived}
+                model={refToPickerValue(thread.model ?? rootChat.model)}
+                onModelChange={onModelChange}
+              />
+            </>
+          ) : null}
+        </div>
+      </header>
+
+      <SmartMessageScrollPane
+        className="min-h-0 overflow-y-auto py-2"
+        contentKey={scrollContentKey}
+        resetKey={thread.id}
+      >
+        {error ? <EmptyState>{error}</EmptyState> : null}
+
+        <ThreadRootPreview
+          avatarDataUrl={avatarDataUrl}
+          message={rootMessage}
+          replyCount={messages.length}
+          userName={userName}
+        />
+
+        {messages.length === 0 ? (
+          <EmptyState>
+            No messages in this branch yet. Continue here to keep the side discussion separate from the channel.
+          </EmptyState>
+        ) : null}
+
+        {messages.map((message) => (
+          <MessageBlock
+            avatarDataUrl={avatarDataUrl}
+            active={pinnedMessageIds.has(message.id)}
+            compact={tone === 'side'}
+            isPinned={pinnedMessageIds.has(message.id)}
+            isSaved={savedMessageIds.has(message.id)}
+            key={message.id}
+            message={message}
+            onOpenThread={onOpenChildThread}
+            onTogglePin={onTogglePin}
+            onToggleSaved={onToggleSaved}
+            userName={userName}
+          />
+        ))}
+      </SmartMessageScrollPane>
+
+      <div>
+        {hasUsableProvider ? null : <ProviderConnectBanner />}
+        {turnInThisThread ? (
+          <TurnInProgressBanner
+            isChannel={rootChat.kind === 'channel'}
+            onCancel={onCancelTurn}
+          />
+        ) : null}
+        <ConversationComposer
+          disabled={sending || archived}
+          onChange={onDraftChange}
+          onSubmit={onSubmit}
+          placeholder="Continue this branch, or /branch to fork again..."
+          submitDisabled={!hasUsableProvider}
+          tone="thread"
+          usage={usage}
+          value={draft}
+        />
+      </div>
+    </div>
+  )
+}
+
 export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspaceProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const [parentError, setParentError] = useState<string | null>(null)
-  const [threadError, setThreadError] = useState<string | null>(null)
+  // One error string per visible thread surface keyed by thread id. At depth
+  // ≥ 2 we render two thread panes (main + side) and each can fail
+  // independently, so a single shared `threadError` would clobber feedback.
+  const [threadErrors, setThreadErrors] = useState<Record<string, string | null>>({})
   const [sendingParent, setSendingParent] = useState(false)
   const [sendingThreadId, setSendingThreadId] = useState<string | null>(null)
   const [parentTab, setParentTab] = useState<ParentTab>('messages')
   const [channelSettingsOpen, setChannelSettingsOpen] = useState(false)
   const pendingMessageJumpRef = useRef<string | null>(null)
 
-  const parentChat = useLiveQuery(() => db.parentChats.get(chatId), [chatId], undefined)
+  // Single source of truth for what each column should render. `main` is the
+  // root channel at depth 0/1 and the focused branch's parent thread at
+  // depth ≥ 2; `side` is the focused branch when threadId is set.
+  const panes = useLiveQuery(
+    () => loadConversationPanes(chatId, threadId),
+    [chatId, threadId],
+    undefined as ConversationPanes | undefined,
+  )
+  const parentChat = panes?.rootChat
+  const mainView = panes?.main
+  const sideView = panes?.side
+  const mainThread = mainView?.kind === 'thread' ? mainView : undefined
   // Agent-DM identity is rendered in the header as a passive chip. Look up
   // the bound agent so its current display name (not the snapshot frozen on
   // each message) drives the chip — keeps it consistent with /settings/agents
@@ -1323,17 +1580,14 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
     [chatId],
     0,
   )
-  const activeThread = useLiveQuery(
-    async () => (threadId ? db.threads.get(threadId) : undefined),
-    [threadId],
-    undefined as ConversationThread | undefined,
-  )
-  const threadMessages = useLiveQuery(
+  // Messages for the focused (side) branch — keyed off the URL param so the
+  // query runs in parallel with `panes` rather than waiting for it to resolve.
+  // The pane only renders these once `sideView` is also set, but starting
+  // the fetch early avoids a render-pass gap where the pane is mounted with
+  // an empty message list.
+  const sideThreadMessages = useLiveQuery(
     async () => {
-      if (!threadId) {
-        return []
-      }
-
+      if (!threadId) return []
       return db.messages
         .where('[conversationId+createdAt]')
         .between([threadId, Dexie.minKey], [threadId, Dexie.maxKey])
@@ -1342,35 +1596,42 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
     [threadId],
     [] as ChatMessage[],
   )
-  const rootMessage = useLiveQuery(
-    async () => (threadId ? getRootMessageForThread(threadId) : undefined),
-    [threadId],
-    undefined as ChatMessage | undefined,
+  // Messages for the parent-thread main pane (only used at depth ≥ 2).
+  // Derived from panes — there's no URL slot for the parent thread, so we
+  // accept the second-step latency here.
+  const mainThreadId = mainThread?.thread.id
+  const mainThreadMessages = useLiveQuery(
+    async () => {
+      if (!mainThreadId) return []
+      return db.messages
+        .where('[conversationId+createdAt]')
+        .between([mainThreadId, Dexie.minKey], [mainThreadId, Dexie.maxKey])
+        .sortBy('createdAt')
+    },
+    [mainThreadId],
+    [] as ChatMessage[],
   )
   const ancestorChain = useLiveQuery(
     async () => (threadId ? getThreadAncestorChain(threadId) : []),
     [threadId],
     [] as ThreadAncestor[],
   )
-  const parentScrollContentKey = parentMessages
-    .map((message) => `${message.id}:${message.content.length}:${message.status}`)
-    .join('|')
+  const parentScrollContentKey = scrollContentKeyFor(parentMessages)
   const parentPinnedScrollContentKey = parentPinnedMessages
     .map((pin) => `${pin.id}:${pin.message.id}:${pin.message.content.length}:${pin.message.status}`)
     .join('|')
-  const threadScrollContentKey = threadMessages
-    .map((message) => `${message.id}:${message.content.length}:${message.status}`)
-    .join('|')
   const parentUsage = latestProviderUsage(parentMessages)
-  const threadUsage = latestProviderUsage(threadMessages)
   const userName = settings?.userName ?? DEFAULT_USER_NAME
   const avatarDataUrl = settings?.avatarDataUrl
   const parentPinnedMessageIds = new Set(parentPinnedMessages.map((pin) => pin.messageId))
-  const threadPinnedMessageIds = new Set(
-    parentPinnedMessages
-      .filter((pin) => pin.conversationId === threadId)
-      .map((pin) => pin.messageId),
-  )
+  // Pinned messages are stored at the channel level; filter to the
+  // conversation that owns each visible thread pane.
+  const pinnedIdsForConversation = (conversationId: string) =>
+    new Set(
+      parentPinnedMessages
+        .filter((pin) => pin.conversationId === conversationId)
+        .map((pin) => pin.messageId),
+    )
   const parentScrollContentKeyForActiveTab =
     parentTab === 'pinned' ? parentPinnedScrollContentKey : parentScrollContentKey
   const providers = useLiveQuery(() => listProviders(), [], [])
@@ -1455,7 +1716,8 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
 
     const messageIsVisible =
       parentMessages.some((message) => message.id === pendingMessageId) ||
-      threadMessages.some((message) => message.id === pendingMessageId)
+      mainThreadMessages.some((message) => message.id === pendingMessageId) ||
+      sideThreadMessages.some((message) => message.id === pendingMessageId)
 
     if (!messageIsVisible) {
       return
@@ -1463,9 +1725,9 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
 
     pendingMessageJumpRef.current = null
     window.requestAnimationFrame(() => jumpToMessage(pendingMessageId))
-  }, [parentMessages, threadMessages])
+  }, [parentMessages, mainThreadMessages, sideThreadMessages])
 
-  if (!parentChat) {
+  if (!parentChat || !mainView) {
     return (
       <div className="flex h-full min-h-0 items-center justify-center p-6 text-center">
         <div>
@@ -1512,21 +1774,16 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
     })
   }
 
+  const setThreadError = (threadIdToSet: string, message: string | null) => {
+    setThreadErrors((current) => ({ ...current, [threadIdToSet]: message }))
+  }
+
   const toggleParentPin = async (messageId: string) => {
     setParentError(null)
     try {
       await togglePinnedMessage(messageId)
     } catch (error) {
       setParentError(error instanceof Error ? error.message : 'Could not update pinned message.')
-    }
-  }
-
-  const toggleThreadPin = async (messageId: string) => {
-    setThreadError(null)
-    try {
-      await togglePinnedMessage(messageId)
-    } catch (error) {
-      setThreadError(error instanceof Error ? error.message : 'Could not update pinned message.')
     }
   }
 
@@ -1539,14 +1796,25 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
     }
   }
 
-  const toggleThreadSaved = async (messageId: string) => {
-    setThreadError(null)
+  // Pin/save toggles share identical error-routing shape — only the
+  // underlying repo call and the fallback message differ. One factory keeps
+  // both thread panes honest about which pane owns the error.
+  const makeThreadActionToggler = (
+    paneThreadId: string,
+    action: (messageId: string) => Promise<unknown>,
+    fallbackMessage: string,
+  ) => async (messageId: string) => {
+    setThreadError(paneThreadId, null)
     try {
-      await toggleSavedMessage(messageId)
+      await action(messageId)
     } catch (error) {
-      setThreadError(error instanceof Error ? error.message : 'Could not update saved message.')
+      setThreadError(paneThreadId, error instanceof Error ? error.message : fallbackMessage)
     }
   }
+  const makeThreadPinToggler = (paneThreadId: string) =>
+    makeThreadActionToggler(paneThreadId, togglePinnedMessage, 'Could not update pinned message.')
+  const makeThreadSavedToggler = (paneThreadId: string) =>
+    makeThreadActionToggler(paneThreadId, toggleSavedMessage, 'Could not update saved message.')
 
   const handleParentSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -1568,298 +1836,202 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
     }
   }
 
-  const handleThreadSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
+  // One factory per thread surface; both visible thread panes (main at
+  // depth ≥ 2, side whenever a branch is open) submit through the same code
+  // path keyed by their own thread id.
+  const makeThreadSubmitHandler = (thread: ConversationThread) =>
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
 
-    if (!activeThread) {
+      const prompt = thread.draft.trim()
+      if (!prompt || sendingThreadId === thread.id) {
+        return
+      }
+
+      setThreadError(thread.id, null)
+      setSendingThreadId(thread.id)
+
+      try {
+        await sendThreadTurn(thread.id, prompt)
+      } catch (error) {
+        setThreadError(thread.id, error instanceof Error ? error.message : 'Request failed.')
+      } finally {
+        setSendingThreadId((currentThreadId) =>
+          currentThreadId === thread.id ? null : currentThreadId,
+        )
+      }
+    }
+
+  // Closing or deleting the focused branch pops up one level: at depth 1
+  // back to the root channel, at depth ≥ 2 back to the focused branch's
+  // immediate parent thread. Keeps "main = parent of side" as the user
+  // walks out of nested branches.
+  const popSideBranch = async () => {
+    if (!sideView) return
+    const parentThreadId = sideView.thread.parentThreadId
+    if (parentThreadId) {
+      await navigate({
+        to: '/chat/$chatId/thread/$threadId',
+        params: { chatId: parentChat.id, threadId: parentThreadId },
+      })
+      return
+    }
+    await navigate({ to: '/chat/$chatId', params: { chatId: parentChat.id } })
+  }
+
+  const deleteSideBranch = async () => {
+    if (!sideView) return
+    const messageCount = sideThreadMessages.length
+    const confirmation =
+      messageCount === 0
+        ? 'Discard this empty branch?'
+        : `Delete this branch and its ${messageCount} ${messageCount === 1 ? 'message' : 'messages'}? Nested branches are removed too.`
+    if (!window.confirm(confirmation)) {
       return
     }
 
-    const prompt = activeThread.draft.trim()
-    if (!prompt || sendingThreadId === activeThread.id) {
-      return
-    }
-
-    setThreadError(null)
-    setSendingThreadId(activeThread.id)
-
+    setThreadError(sideView.thread.id, null)
     try {
-      await sendThreadTurn(activeThread.id, prompt)
+      // Cancel any in-flight stream first so orchestrator chunks don't keep
+      // writing into a now-deleted thread. The interrupt is scoped to the
+      // root chat and is a no-op when nothing is active.
+      await interruptActiveTurn(parentChat.id)
+      await deleteThread(sideView.thread.id)
+      await popSideBranch()
     } catch (error) {
-      setThreadError(error instanceof Error ? error.message : 'Request failed.')
-    } finally {
-      setSendingThreadId((currentThreadId) =>
-        currentThreadId === activeThread.id ? null : currentThreadId,
+      setThreadError(
+        sideView.thread.id,
+        error instanceof Error ? error.message : 'Could not delete branch.',
       )
     }
   }
+
+  const showSecondColumn = Boolean(threadId)
+  // Lineage breadcrumb spans both panes — its last segment is the side
+  // pane's root, second-to-last (when present) is the main thread.
+  const lineageActiveRoot = sideView?.rootMessage ?? mainThread?.rootMessage
+  const lineageAncestors = ancestorChain
 
   return (
     <div
       className={cn(
         'grid h-full min-h-0 min-w-0 overflow-hidden',
-        threadId ? 'xl:grid-cols-[minmax(0,1fr)_minmax(340px,40%)] 2xl:grid-cols-[minmax(0,1fr)_460px]' : 'grid-cols-1',
+        showSecondColumn
+          ? 'xl:grid-cols-[minmax(0,1fr)_minmax(340px,40%)] 2xl:grid-cols-[minmax(0,1fr)_460px]'
+          : 'grid-cols-1',
       )}
     >
-      <section className={cn('min-w-0 grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto]', threadId ? 'hidden xl:grid' : '')}>
-        <ChannelHeader
-          activeTab={parentTab}
-          branchCount={branchCount}
-          identityChip={
-            parentChat.kind === 'channel'
-              ? undefined
-              : parentChat.agentId && boundAgent
-                ? (
-                  <AgentIdentityChip
-                    agentId={boundAgent.id}
-                    agentName={boundAgent.displayName}
-                    modelName={modelShortName(boundAgent.model ?? null)}
+      {mainView.kind === 'parent' ? (
+        <section className={cn('min-w-0 grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto]', showSecondColumn ? 'hidden xl:grid' : '')}>
+          <ChannelHeader
+            activeTab={parentTab}
+            branchCount={branchCount}
+            identityChip={
+              parentChat.kind === 'channel'
+                ? undefined
+                : parentChat.agentId && boundAgent
+                  ? (
+                    <AgentIdentityChip
+                      agentId={boundAgent.id}
+                      agentName={boundAgent.displayName}
+                      modelName={modelShortName(boundAgent.model ?? null)}
+                    />
+                  )
+                  : (
+                    <ModelChip
+                      availableModels={availableModels}
+                      connections={providers}
+                      disabled={Boolean(parentChat.archivedAt)}
+                      model={refToPickerValue(parentChat.model)}
+                      onModelChange={(model) =>
+                        void setParentChatModel(parentChat.id, pickerValueToRef(model))
+                      }
+                    />
+                  )
+            }
+            isChannel={parentChat.kind === 'channel'}
+            messageCount={parentMessages.length}
+            onOpenChannelSettings={
+              parentChat.kind === 'channel'
+                ? () => setChannelSettingsOpen(true)
+                : undefined
+            }
+            onRename={(title) => void renameParentChat(parentChat.id, title)}
+            onTabChange={setParentTab}
+            onToggleStar={() => void toggleStarParentChat(parentChat.id)}
+            participantCount={channelParticipants.length}
+            pinnedCount={parentPinnedMessages.length}
+            starred={Boolean(parentChat.starredAt)}
+            title={parentChat.title}
+          />
+          <LineageBar
+            activeRoot={lineageActiveRoot}
+            ancestors={lineageAncestors}
+            chatId={parentChat.id}
+            parentTitle={parentChat.title}
+          />
+
+          <SmartMessageScrollPane
+            className="row-start-3 min-h-0 overflow-y-auto bg-surface py-2"
+            contentKey={parentScrollContentKeyForActiveTab}
+            resetKey={`${chatId}:${parentTab}`}
+          >
+            {parentChat.archivedAt ? (
+              <EmptyState>This conversation is archived. Restore it from the sidebar to continue.</EmptyState>
+            ) : null}
+
+            {parentError ? <EmptyState>{parentError}</EmptyState> : null}
+
+            {parentTab === 'pinned' ? (
+              parentPinnedMessages.length === 0 ? (
+                <EmptyState>No pinned messages in this channel yet.</EmptyState>
+              ) : (
+                parentPinnedMessages.map((pin) => (
+                  <MessageBlock
+                    active
+                    avatarDataUrl={avatarDataUrl}
+                    isPinned
+                    isSaved={savedMessageIds.has(pin.message.id)}
+                    key={pin.id}
+                    message={pin.message}
+                    onOpenThread={(messageId) => void openThreadForMessage(messageId)}
+                    onSelect={() => void openPinnedMessage(pin)}
+                    onTogglePin={toggleParentPin}
+                    onToggleSaved={toggleParentSaved}
+                    userName={userName}
                   />
-                )
-                : (
-                  <ModelChip
-                    availableModels={availableModels}
-                    connections={providers}
-                    disabled={Boolean(parentChat.archivedAt)}
-                    model={refToPickerValue(parentChat.model)}
-                    onModelChange={(model) =>
-                      void setParentChatModel(parentChat.id, pickerValueToRef(model))
-                    }
-                  />
-                )
-          }
-          isChannel={parentChat.kind === 'channel'}
-          messageCount={parentMessages.length}
-          onOpenChannelSettings={
-            parentChat.kind === 'channel'
-              ? () => setChannelSettingsOpen(true)
-              : undefined
-          }
-          onRename={(title) => void renameParentChat(parentChat.id, title)}
-          onTabChange={setParentTab}
-          onToggleStar={() => void toggleStarParentChat(parentChat.id)}
-          participantCount={channelParticipants.length}
-          pinnedCount={parentPinnedMessages.length}
-          starred={Boolean(parentChat.starredAt)}
-          title={parentChat.title}
-        />
-        <LineageBar
-          activeRoot={rootMessage}
-          ancestors={ancestorChain}
-          chatId={parentChat.id}
-          parentTitle={parentChat.title}
-        />
-
-        <SmartMessageScrollPane
-          className="row-start-3 min-h-0 overflow-y-auto bg-surface py-2"
-          contentKey={parentScrollContentKeyForActiveTab}
-          resetKey={`${chatId}:${parentTab}`}
-        >
-          {parentChat.archivedAt ? (
-            <EmptyState>This conversation is archived. Restore it from the sidebar to continue.</EmptyState>
-          ) : null}
-
-          {parentError ? <EmptyState>{parentError}</EmptyState> : null}
-
-          {parentTab === 'pinned' ? (
-            parentPinnedMessages.length === 0 ? (
-              <EmptyState>No pinned messages in this channel yet.</EmptyState>
+                ))
+              )
+            ) : parentMessages.length === 0 ? (
+              <EmptyState>
+                This channel is empty. Send a top-level message, then use the branch action on any message to fork the conversation.
+              </EmptyState>
             ) : (
-              parentPinnedMessages.map((pin) => (
+              parentMessages.map((message) => (
                 <MessageBlock
-                  active
                   avatarDataUrl={avatarDataUrl}
-                  isPinned
-                  isSaved={savedMessageIds.has(pin.message.id)}
-                  key={pin.id}
-                  message={pin.message}
+                  active={parentPinnedMessageIds.has(message.id)}
+                  isPinned={parentPinnedMessageIds.has(message.id)}
+                  isSaved={savedMessageIds.has(message.id)}
+                  key={message.id}
+                  message={message}
                   onOpenThread={(messageId) => void openThreadForMessage(messageId)}
-                  onSelect={() => void openPinnedMessage(pin)}
                   onTogglePin={toggleParentPin}
                   onToggleSaved={toggleParentSaved}
                   userName={userName}
                 />
               ))
-            )
-          ) : parentMessages.length === 0 ? (
-            <EmptyState>
-              This channel is empty. Send a top-level message, then use the branch action on any message to fork the conversation.
-            </EmptyState>
-          ) : (
-            parentMessages.map((message) => (
-              <MessageBlock
-                avatarDataUrl={avatarDataUrl}
-                active={parentPinnedMessageIds.has(message.id)}
-                isPinned={parentPinnedMessageIds.has(message.id)}
-                isSaved={savedMessageIds.has(message.id)}
-                key={message.id}
-                message={message}
-                onOpenThread={(messageId) => void openThreadForMessage(messageId)}
-                onTogglePin={toggleParentPin}
-                onToggleSaved={toggleParentSaved}
-                userName={userName}
-              />
-            ))
-          )}
-        </SmartMessageScrollPane>
-
-        <div className="row-start-4">
-          {hasUsableProvider ? null : <ProviderConnectBanner />}
-          {/* Scope the banner to the parent surface — a thread-scoped turn
-              has its own activity in the thread aside and shouldn't double
-              up here. */}
-          {activeTurn &&
-          activeTurn.conversationType === 'parent' &&
-          activeTurn.conversationId === parentChat.id ? (
-            <TurnInProgressBanner
-              isChannel={parentChat.kind === 'channel'}
-              onCancel={() => void interruptActiveTurn(parentChat.id)}
-            />
-          ) : null}
-          <ConversationComposer
-            disabled={
-              sendingParent ||
-              Boolean(parentChat.archivedAt)
-            }
-            onChange={(value) => void saveParentDraft(parentChat.id, value)}
-            onSubmit={handleParentSubmit}
-            placeholder="Ask anything, or /branch to fork this convo..."
-            submitDisabled={!hasUsableProvider}
-            tone="parent"
-            usage={parentUsage}
-            value={parentChat.draft}
-          />
-        </div>
-      </section>
-
-      {threadId ? (
-        <aside className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden border-l border-line-strong bg-surface">
-          <header className="border-b border-line px-3.5 pb-2 pt-2.5">
-            <div className="flex items-center gap-2">
-              <GitBranch className="size-3.5 shrink-0 text-accent" />
-              <h2 className="min-w-0 flex-1 truncate text-heading font-bold tracking-tight text-ink">
-                Branch
-              </h2>
-              <ThreadActionsMenu
-                disabled={!activeThread}
-                onDelete={async () => {
-                  if (!activeThread) {
-                    return
-                  }
-
-                  const messageCount = threadMessages.length
-                  const confirmation =
-                    messageCount === 0
-                      ? 'Discard this empty branch?'
-                      : `Delete this branch and its ${messageCount} ${messageCount === 1 ? 'message' : 'messages'}? Nested branches are removed too.`
-                  if (!window.confirm(confirmation)) {
-                    return
-                  }
-
-                  setThreadError(null)
-                  try {
-                    await deleteThread(activeThread.id)
-                    await navigate({
-                      to: '/chat/$chatId',
-                      params: { chatId: parentChat.id },
-                    })
-                  } catch (error) {
-                    setThreadError(
-                      error instanceof Error ? error.message : 'Could not delete branch.',
-                    )
-                  }
-                }}
-              />
-              <button
-                aria-label="Close branch"
-                className="rounded p-0.5 leading-none text-ink-muted transition hover:text-ink"
-                onClick={() =>
-                  void navigate({
-                    to: '/chat/$chatId',
-                    params: { chatId: parentChat.id },
-                  })
-                }
-                type="button"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-            <div className="mt-1.5 flex items-center gap-2 font-mono text-meta text-ink-muted">
-              <span>fork: <span className="text-ink">{rootMessage ? formatTime(rootMessage.createdAt) : 'unknown'}</span></span>
-              <span>·</span>
-              <span>{threadMessages.length} msgs</span>
-              {/* Model picker for model-DM threads only. Agent-DM and channel
-                  threads draw their model(s) from the agent definition(s) and
-                  do not expose a per-thread override. */}
-              {parentChat.kind === 'dm' && !parentChat.agentId ? (
-                <>
-                  <span>·</span>
-                  <ModelChip
-                    availableModels={availableModels}
-                    connections={providers}
-                    disabled={!activeThread || Boolean(parentChat.archivedAt)}
-                    model={refToPickerValue(activeThread?.model ?? parentChat.model)}
-                    onModelChange={(model) =>
-                      activeThread
-                        ? void setThreadModel(activeThread.id, pickerValueToRef(model))
-                        : undefined
-                    }
-                  />
-                </>
-              ) : null}
-            </div>
-          </header>
-
-          <SmartMessageScrollPane
-            className="min-h-0 overflow-y-auto py-2"
-            contentKey={threadScrollContentKey}
-            resetKey={threadId ?? 'none'}
-          >
-            {!activeThread ? (
-              <EmptyState>This branch does not exist in local storage.</EmptyState>
-            ) : null}
-
-            {threadError ? <EmptyState>{threadError}</EmptyState> : null}
-
-            {activeThread && rootMessage ? (
-              <ThreadRootPreview
-                avatarDataUrl={avatarDataUrl}
-                message={rootMessage}
-                replyCount={threadMessages.length}
-                userName={userName}
-              />
-            ) : null}
-
-            {activeThread && threadMessages.length === 0 ? (
-              <EmptyState>
-                No messages in this branch yet. Continue here to keep the side discussion separate from the channel.
-              </EmptyState>
-            ) : null}
-
-            {threadMessages.map((message) => (
-              <MessageBlock
-                avatarDataUrl={avatarDataUrl}
-                active={threadPinnedMessageIds.has(message.id)}
-                compact
-                isPinned={threadPinnedMessageIds.has(message.id)}
-                isSaved={savedMessageIds.has(message.id)}
-                key={message.id}
-                message={message}
-                onOpenThread={(messageId) => void openThreadForMessage(messageId)}
-                onTogglePin={toggleThreadPin}
-                onToggleSaved={toggleThreadSaved}
-                userName={userName}
-              />
-            ))}
+            )}
           </SmartMessageScrollPane>
 
-          <div>
+          <div className="row-start-4">
             {hasUsableProvider ? null : <ProviderConnectBanner />}
-            {/* Mirror the parent-surface guard: the thread banner only shows
-                when the active turn is scoped to *this* thread. */}
+            {/* Scope the banner to the parent surface — a thread-scoped turn
+                has its own activity in the thread aside and shouldn't double
+                up here. */}
             {activeTurn &&
-            activeTurn.conversationType === 'thread' &&
-            activeTurn.conversationId === threadId ? (
+            activeTurn.conversationType === 'parent' &&
+            activeTurn.conversationId === parentChat.id ? (
               <TurnInProgressBanner
                 isChannel={parentChat.kind === 'channel'}
                 onCancel={() => void interruptActiveTurn(parentChat.id)}
@@ -1867,25 +2039,135 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
             ) : null}
             <ConversationComposer
               disabled={
-                !activeThread ||
-                sendingThreadId === activeThread.id ||
+                sendingParent ||
                 Boolean(parentChat.archivedAt)
               }
-              onChange={(value) =>
-                activeThread ? void saveThreadDraft(activeThread.id, value) : undefined
-              }
-              onSubmit={handleThreadSubmit}
-              placeholder="Continue this branch, or /branch to fork again..."
+              onChange={(value) => void saveParentDraft(parentChat.id, value)}
+              onSubmit={handleParentSubmit}
+              placeholder="Ask anything, or /branch to fork this convo..."
               submitDisabled={!hasUsableProvider}
-              tone="thread"
-              usage={threadUsage}
-              value={activeThread?.draft ?? ''}
+              tone="parent"
+              usage={parentUsage}
+              value={parentChat.draft}
             />
           </div>
+        </section>
+      ) : (
+        // Depth ≥ 2: the main column shows the immediate parent thread of
+        // the focused branch. LineageBar above the pane keeps the chain
+        // back to the channel visible.
+        <section className={cn('grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden', showSecondColumn ? 'hidden xl:grid' : '')}>
+          <LineageBar
+            activeRoot={lineageActiveRoot}
+            ancestors={lineageAncestors}
+            chatId={parentChat.id}
+            parentTitle={parentChat.title}
+          />
+          <ThreadPane
+            activeTurn={activeTurn}
+            availableModels={availableModels}
+            avatarDataUrl={avatarDataUrl}
+            draft={mainView.thread.draft}
+            error={threadErrors[mainView.thread.id] ?? null}
+            hasUsableProvider={hasUsableProvider}
+            messages={mainThreadMessages}
+            onCancelTurn={() => void interruptActiveTurn(parentChat.id)}
+            onDelete={async () => {
+              // Deleting the main thread implicitly removes the side too
+              // (cascade) — interrupt any active stream first so it can't
+              // keep writing into a deleted thread, then navigate to the
+              // main thread's parent so the user lands somewhere coherent.
+              if (!window.confirm('Delete this branch? Nested branches are removed too.')) {
+                return
+              }
+              setThreadError(mainView.thread.id, null)
+              try {
+                await interruptActiveTurn(parentChat.id)
+                await deleteThread(mainView.thread.id)
+                const parentOfMain = mainView.thread.parentThreadId
+                await navigate(
+                  parentOfMain
+                    ? {
+                        to: '/chat/$chatId/thread/$threadId',
+                        params: { chatId: parentChat.id, threadId: parentOfMain },
+                      }
+                    : { to: '/chat/$chatId', params: { chatId: parentChat.id } },
+                )
+              } catch (error) {
+                setThreadError(
+                  mainView.thread.id,
+                  error instanceof Error ? error.message : 'Could not delete branch.',
+                )
+              }
+            }}
+            onDraftChange={(value) => void saveThreadDraft(mainView.thread.id, value)}
+            onModelChange={(value) =>
+              void setThreadModel(mainView.thread.id, pickerValueToRef(value))
+            }
+            onOpenChildThread={(messageId) => void openThreadForMessage(messageId)}
+            onSubmit={makeThreadSubmitHandler(mainView.thread)}
+            onTogglePin={makeThreadPinToggler(mainView.thread.id)}
+            onToggleSaved={makeThreadSavedToggler(mainView.thread.id)}
+            pinnedMessageIds={pinnedIdsForConversation(mainView.thread.id)}
+            providers={providers}
+            refToPickerValue={refToPickerValue}
+            rootChat={parentChat}
+            rootMessage={mainView.rootMessage}
+            savedMessageIds={savedMessageIds}
+            scrollContentKey={scrollContentKeyFor(mainThreadMessages)}
+            sending={sendingThreadId === mainView.thread.id}
+            showModelPicker={parentChat.kind === 'dm' && !parentChat.agentId}
+            thread={mainView.thread}
+            tone="main"
+            usage={latestProviderUsage(mainThreadMessages)}
+            userName={userName}
+          />
+        </section>
+      )}
+
+      {showSecondColumn ? (
+        <aside className="grid min-h-0 min-w-0 overflow-hidden border-l border-line-strong bg-surface">
+          {sideView ? (
+            <ThreadPane
+              activeTurn={activeTurn}
+              availableModels={availableModels}
+              avatarDataUrl={avatarDataUrl}
+              draft={sideView.thread.draft}
+              error={threadErrors[sideView.thread.id] ?? null}
+              hasUsableProvider={hasUsableProvider}
+              messages={sideThreadMessages}
+              onCancelTurn={() => void interruptActiveTurn(parentChat.id)}
+              onClose={() => void popSideBranch()}
+              onDelete={deleteSideBranch}
+              onDraftChange={(value) => void saveThreadDraft(sideView.thread.id, value)}
+              onModelChange={(value) =>
+                void setThreadModel(sideView.thread.id, pickerValueToRef(value))
+              }
+              onOpenChildThread={(messageId) => void openThreadForMessage(messageId)}
+              onSubmit={makeThreadSubmitHandler(sideView.thread)}
+              onTogglePin={makeThreadPinToggler(sideView.thread.id)}
+              onToggleSaved={makeThreadSavedToggler(sideView.thread.id)}
+              pinnedMessageIds={pinnedIdsForConversation(sideView.thread.id)}
+              providers={providers}
+              refToPickerValue={refToPickerValue}
+              rootChat={parentChat}
+              rootMessage={sideView.rootMessage}
+              savedMessageIds={savedMessageIds}
+              scrollContentKey={scrollContentKeyFor(sideThreadMessages)}
+              sending={sendingThreadId === sideView.thread.id}
+              showModelPicker={parentChat.kind === 'dm' && !parentChat.agentId}
+              thread={sideView.thread}
+              tone="side"
+              usage={latestProviderUsage(sideThreadMessages)}
+              userName={userName}
+            />
+          ) : (
+            <MissingBranchPlaceholder onClose={() => void popSideBranch()} />
+          )}
         </aside>
       ) : null}
 
-      {!threadId && parentMessages.length === 0 ? (
+      {!showSecondColumn && parentMessages.length === 0 && mainView.kind === 'parent' ? (
         <div className="hidden items-center justify-center gap-3 border-l border-line xl:flex">
           <div className="max-w-sm text-center">
             <GitBranch className="mx-auto size-7 text-accent" />

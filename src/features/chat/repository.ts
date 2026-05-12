@@ -1045,3 +1045,84 @@ export async function getThreadAncestorChain(threadId: string) {
 
   return chain
 }
+
+// A single conversation surface — either the root parent chat, or a thread.
+// Split as two named types so the side pane (which is always a thread when
+// present) can be typed without needing a runtime narrowing dance.
+export type ParentView = { kind: 'parent'; parentChat: ParentChat }
+export type ThreadView = { kind: 'thread'; thread: ConversationThread; rootMessage: ChatMessage }
+export type ConversationView = ParentView | ThreadView
+
+export interface ConversationPanes {
+  // The root parent chat is the channel context — kept available even when
+  // `main` is a thread so channel-scoped chrome (sidebar, pinned, settings)
+  // can still anchor to it.
+  rootChat: ParentChat | undefined
+  // What the main column renders. Equals `rootChat` at depth 0/1, and the
+  // immediate parent thread at depth ≥ 2.
+  main: ConversationView | undefined
+  // What the side column renders. Always a thread when set; callers can
+  // dereference `side.thread` without narrowing.
+  side: ThreadView | undefined
+}
+
+// Derives "main" and "side" surfaces from a URL pair (chatId, threadId).
+// Invariant: main is always the parent of side. At depth 1 that parent is
+// the root channel; at depth ≥ 2 it is the immediate parent thread. When no
+// threadId is supplied, side is undefined and main is the root channel.
+export async function loadConversationPanes(
+  chatId: string,
+  threadId?: string,
+): Promise<ConversationPanes> {
+  const rootChat = await db.parentChats.get(chatId)
+  if (!rootChat) {
+    return { rootChat: undefined, main: undefined, side: undefined }
+  }
+
+  if (!threadId) {
+    return {
+      rootChat,
+      main: { kind: 'parent', parentChat: rootChat },
+      side: undefined,
+    }
+  }
+
+  const sideThread = await db.threads.get(threadId)
+  const sideRoot = sideThread ? await db.messages.get(sideThread.rootMessageId) : undefined
+  // If either the thread or its root message is missing locally, treat the
+  // side as absent and let the workspace render its "missing branch" state
+  // while keeping main pointed at the channel.
+  if (!sideThread || !sideRoot) {
+    return {
+      rootChat,
+      main: { kind: 'parent', parentChat: rootChat },
+      side: undefined,
+    }
+  }
+
+  const side: ConversationView = {
+    kind: 'thread',
+    thread: sideThread,
+    rootMessage: sideRoot,
+  }
+
+  if (sideThread.parentThreadId) {
+    const parentThread = await db.threads.get(sideThread.parentThreadId)
+    const parentThreadRoot = parentThread
+      ? await db.messages.get(parentThread.rootMessageId)
+      : undefined
+    if (parentThread && parentThreadRoot) {
+      return {
+        rootChat,
+        main: { kind: 'thread', thread: parentThread, rootMessage: parentThreadRoot },
+        side,
+      }
+    }
+  }
+
+  return {
+    rootChat,
+    main: { kind: 'parent', parentChat: rootChat },
+    side,
+  }
+}

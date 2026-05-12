@@ -18,6 +18,7 @@ import {
   listPinnedMessagesForConversation,
   listPinnedMessagesForParentChat,
   listSavedMessages,
+  loadConversationPanes,
   pinMessage,
   saveMessage,
   starParentChat,
@@ -989,5 +990,100 @@ describe('thread repository semantics', () => {
   it('is a no-op when deleting a missing thread', async () => {
     await db.parentChats.add(parentChat())
     await expect(deleteThread('missing-thread')).resolves.toBeUndefined()
+  })
+})
+
+describe('loadConversationPanes', () => {
+  it('returns all-undefined when the parent chat is missing', async () => {
+    const panes = await loadConversationPanes('missing-chat')
+
+    expect(panes.rootChat).toBeUndefined()
+    expect(panes.main).toBeUndefined()
+    expect(panes.side).toBeUndefined()
+  })
+
+  it('returns main = root parent chat and no side when no threadId is given', async () => {
+    await db.parentChats.add(parentChat())
+
+    const panes = await loadConversationPanes('parent-1')
+
+    expect(panes.rootChat?.id).toBe('parent-1')
+    expect(panes.main).toEqual({ kind: 'parent', parentChat: expect.objectContaining({ id: 'parent-1' }) })
+    expect(panes.side).toBeUndefined()
+  })
+
+  it('at depth 1 puts the root channel in main and the thread on the side', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'root', content: 'root', directReplyCount: 1 }))
+    const thread = await getOrCreateThreadForMessage('root')
+
+    const panes = await loadConversationPanes('parent-1', thread.id)
+
+    expect(panes.main).toEqual({ kind: 'parent', parentChat: expect.objectContaining({ id: 'parent-1' }) })
+    expect(panes.side).toMatchObject({
+      kind: 'thread',
+      thread: { id: thread.id, parentChatId: 'parent-1' },
+      rootMessage: { id: 'root' },
+    })
+  })
+
+  it('at depth 2 puts the parent thread in main and the focused thread on the side', async () => {
+    await db.parentChats.add(parentChat())
+    await db.messages.add(message({ id: 'root', content: 'root', directReplyCount: 1 }))
+    const parentThread = await getOrCreateThreadForMessage('root')
+    await db.messages.add(
+      message({
+        id: 'thread-msg',
+        conversationType: 'thread',
+        conversationId: parentThread.id,
+        content: 'inside parent thread',
+        createdAt: 2,
+        directReplyCount: 1,
+      }),
+    )
+    const childThread = await getOrCreateThreadForMessage('thread-msg')
+
+    const panes = await loadConversationPanes('parent-1', childThread.id)
+
+    expect(panes.main).toMatchObject({
+      kind: 'thread',
+      thread: { id: parentThread.id },
+      rootMessage: { id: 'root' },
+    })
+    expect(panes.side).toMatchObject({
+      kind: 'thread',
+      thread: { id: childThread.id, parentThreadId: parentThread.id },
+      rootMessage: { id: 'thread-msg' },
+    })
+  })
+
+  it('falls back to root-as-main with no side when the requested thread is missing locally', async () => {
+    await db.parentChats.add(parentChat())
+
+    const panes = await loadConversationPanes('parent-1', 'missing-thread')
+
+    expect(panes.main).toEqual({ kind: 'parent', parentChat: expect.objectContaining({ id: 'parent-1' }) })
+    expect(panes.side).toBeUndefined()
+  })
+
+  it('falls back to root-as-main when the side thread exists but its root message is gone', async () => {
+    // Defensive against a transient cascade-delete window — we should still
+    // render the root channel rather than crash on a missing message.
+    await db.parentChats.add(parentChat())
+    await db.threads.add({
+      id: 'orphan-thread',
+      parentChatId: 'parent-1',
+      rootMessageId: 'missing-root',
+      depth: 1,
+      draft: '',
+      model: null,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+
+    const panes = await loadConversationPanes('parent-1', 'orphan-thread')
+
+    expect(panes.main).toEqual({ kind: 'parent', parentChat: expect.objectContaining({ id: 'parent-1' }) })
+    expect(panes.side).toBeUndefined()
   })
 })
