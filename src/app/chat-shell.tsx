@@ -1,4 +1,4 @@
-import { useDeferredValue, useState } from 'react'
+import { Fragment, useDeferredValue, useState } from 'react'
 import type { RefCallback } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
@@ -7,7 +7,6 @@ import {
   ArchiveRestore,
   Bookmark,
   ExternalLink,
-  GitBranch,
   Hash,
   KeyRound,
   MessageSquarePlus,
@@ -28,13 +27,11 @@ import {
   countStartedBranchesByParentChat,
   db,
   deleteParentChat,
-  previewText,
   restoreParentChat,
   toggleStarParentChat,
-  type ChatMessage,
-  type ConversationThread,
   type ParentChat,
 } from '@/features/chat/repository'
+import { ChatBranchesSlot } from '@/features/chat/components/active-chat-branches'
 import { NewChatModal } from '@/features/chat/components/new-chat-modal'
 import { listProviders } from '@/features/providers/providers-repository'
 import {
@@ -75,15 +72,6 @@ function DmRowGlyph({ parentChat }: { parentChat: ParentChat }) {
     )
   }
   return <Hash aria-hidden="true" className="size-3.5 shrink-0 text-sidebar-fg-dim" />
-}
-
-function branchTitle(rootMessage?: ChatMessage) {
-  if (!rootMessage) {
-    return 'Untitled branch'
-  }
-
-  const text = previewText(rootMessage.content)
-  return text.length > 32 ? `${text.slice(0, 29)}...` : text || 'Untitled branch'
 }
 
 function ChatActionsMenu({
@@ -181,86 +169,6 @@ function ChatActionsMenu({
   )
 }
 
-function isThreadVisible(
-  thread: ConversationThread,
-  messagesById: Map<string, ChatMessage>,
-  activeThreadId?: string,
-) {
-  if (thread.id === activeThreadId) {
-    return true
-  }
-  const rootMessage = messagesById.get(thread.rootMessageId)
-  return Boolean(rootMessage && rootMessage.directReplyCount > 0)
-}
-
-function BranchTreeNode({
-  activeThreadId,
-  depth,
-  messagesById,
-  parentChatId,
-  thread,
-  threadsByParent,
-}: {
-  activeThreadId?: string
-  depth: number
-  messagesById: Map<string, ChatMessage>
-  parentChatId: string
-  thread: ConversationThread
-  threadsByParent: Map<string, ConversationThread[]>
-}) {
-  const children = (threadsByParent.get(thread.id) ?? []).filter((child) =>
-    isThreadVisible(child, messagesById, activeThreadId),
-  )
-  const active = thread.id === activeThreadId
-  const rootMessage = messagesById.get(thread.rootMessageId)
-  const title = branchTitle(rootMessage)
-
-  return (
-    <>
-      <Link
-        className={cn(
-          'group relative mx-2 flex items-center gap-2 rounded-md px-2 py-1.5 text-small transition',
-          active
-            ? 'bg-sidebar-active font-semibold text-sidebar-active-fg'
-            : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
-        )}
-        params={{ chatId: parentChatId, threadId: thread.id }}
-        style={{ paddingLeft: `${10 + depth * 18}px` }}
-        to="/chat/$chatId/thread/$threadId"
-      >
-        {depth > 0 ? (
-          <>
-            <span
-              className="absolute bottom-1/2 top-0 w-px bg-sidebar-line"
-              style={{ left: `${8 + (depth - 1) * 18}px` }}
-            />
-            <span
-              className="absolute top-1/2 h-px w-3 bg-sidebar-line"
-              style={{ left: `${8 + (depth - 1) * 18}px` }}
-            />
-          </>
-        ) : null}
-        <GitBranch className={cn('size-3.5 shrink-0', active ? 'text-sidebar-active-fg' : 'text-sidebar-chip')} />
-        <span className="min-w-0 flex-1 truncate">{title}</span>
-        <span className={cn('font-mono text-meta', active ? 'text-sidebar-active-fg/80' : 'text-sidebar-fg-dim')}>
-          {rootMessage?.directReplyCount || 'new'}
-        </span>
-      </Link>
-      {children.map((child) => (
-        <BranchTreeNode
-          activeThreadId={activeThreadId}
-          depth={depth + 1}
-          key={child.id}
-          messagesById={messagesById}
-          parentChatId={parentChatId}
-          thread={child}
-          threadsByParent={threadsByParent}
-        />
-      ))}
-    </>
-  )
-}
-
 // ChatShell is the chat-area layout: the conversations sidebar (recent /
 // starred / branches / archived) plus the active route's content. It is the
 // layout for chat-related routes only — settings routes use SettingsShell
@@ -286,25 +194,6 @@ export function ChatShell() {
     () => countStartedBranchesByParentChat(),
     [],
     new Map<string, number>(),
-  )
-  const activeThreads = useLiveQuery(
-    () =>
-      activeChatId
-        ? db.threads.where('parentChatId').equals(activeChatId).sortBy('createdAt')
-        : Promise.resolve([] as ConversationThread[]),
-    [activeChatId],
-    [] as ConversationThread[],
-  )
-  const branchRootMessages = useLiveQuery(
-    async () => {
-      if (activeThreads.length === 0) {
-        return []
-      }
-
-      return db.messages.bulkGet(activeThreads.map((thread) => thread.rootMessageId))
-    },
-    [activeThreads],
-    [] as Array<ChatMessage | undefined>,
   )
 
   const handleNewParentChat = () => {
@@ -349,34 +238,9 @@ export function ChatShell() {
   const visibleChannelParentChats = [...channelParentChats].sort(
     (a, b) => b.updatedAt - a.updatedAt,
   )
-  const activeParentChat = activeChatId
-    ? parentChats.find((chat) => chat.id === activeChatId)
-    : undefined
   const userName = settings?.userName ?? DEFAULT_USER_NAME
   const avatarDataUrl = settings?.avatarDataUrl
   const hasProviderKey = providers.some((provider) => provider.apiKey?.trim())
-  const messagesById = new Map(
-    branchRootMessages
-      .filter((message): message is ChatMessage => Boolean(message))
-      .map((message) => [message.id, message]),
-  )
-  const rootThreads = activeThreads.filter(
-    (thread) =>
-      !thread.parentThreadId && isThreadVisible(thread, messagesById, activeThreadId),
-  )
-  const threadsByParent = activeThreads.reduce(
-    (map, thread) => {
-      if (!thread.parentThreadId) {
-        return map
-      }
-
-      const siblings = map.get(thread.parentThreadId) ?? []
-      siblings.push(thread)
-      map.set(thread.parentThreadId, siblings)
-      return map
-    },
-    new Map<string, ConversationThread[]>(),
-  )
 
   return (
     <div className="grid h-full min-h-0 lg:grid-cols-[260px_minmax(0,1fr)]">
@@ -451,63 +315,45 @@ export function ChatShell() {
                 <span>Starred</span>
               </div>
               {starredParentChats.map((parentChat) => {
-                const active =
-                  location.pathname === `/chat/${parentChat.id}` ||
-                  location.pathname.startsWith(`/chat/${parentChat.id}/thread/`)
+                const active = parentChat.id === activeChatId
                 const branchCount = threadCountByParentChat.get(parentChat.id) ?? 0
 
                 return (
-                  <div
-                    className={cn(
-                      'group mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-body transition',
-                      active
-                        ? 'bg-sidebar-active font-semibold text-sidebar-active-fg'
-                        : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
-                    )}
-                    key={parentChat.id}
-                  >
-                    <Link
-                      className="flex min-w-0 flex-1 items-center gap-2"
-                      params={{ chatId: parentChat.id }}
-                      to="/chat/$chatId"
+                  <Fragment key={parentChat.id}>
+                    <div
+                      className={cn(
+                        'group mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-body transition',
+                        active
+                          ? 'bg-sidebar-active font-semibold text-sidebar-active-fg'
+                          : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
+                      )}
                     >
-                      <DmRowGlyph parentChat={parentChat} />
-                      <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
-                      {branchCount > 0 ? (
-                        <span className="rounded bg-white/10 px-1.5 font-mono text-meta font-semibold text-sidebar-chip">
-                          ↳{branchCount}
-                        </span>
-                      ) : null}
-                    </Link>
-                    <ChatActionsMenu
-                      onDelete={() => void handleDeleteParentChat(parentChat)}
-                      parentChat={parentChat}
+                      <Link
+                        className="flex min-w-0 flex-1 items-center gap-2"
+                        params={{ chatId: parentChat.id }}
+                        to="/chat/$chatId"
+                      >
+                        <DmRowGlyph parentChat={parentChat} />
+                        <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
+                        {branchCount > 0 ? (
+                          <span className="rounded bg-white/10 px-1.5 font-mono text-meta font-semibold text-sidebar-chip">
+                            ↳{branchCount}
+                          </span>
+                        ) : null}
+                      </Link>
+                      <ChatActionsMenu
+                        onDelete={() => void handleDeleteParentChat(parentChat)}
+                        parentChat={parentChat}
+                      />
+                    </div>
+                    <ChatBranchesSlot
+                      active={active}
+                      activeThreadId={activeThreadId}
+                      parentChatId={parentChat.id}
                     />
-                  </div>
+                  </Fragment>
                 )
               })}
-            </section>
-          ) : null}
-
-          {activeParentChat && rootThreads.length > 0 ? (
-            <section className="mt-5">
-              <div className="mb-1 flex items-center justify-between px-4">
-                <span className="font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
-                  This conversation
-                </span>
-                <span className="font-mono text-meta text-sidebar-fg-dim">map ↗</span>
-              </div>
-              {rootThreads.map((thread) => (
-                <BranchTreeNode
-                  activeThreadId={activeThreadId}
-                  depth={1}
-                  key={thread.id}
-                  messagesById={messagesById}
-                  parentChatId={activeParentChat.id}
-                  thread={thread}
-                  threadsByParent={threadsByParent}
-                />
-              ))}
             </section>
           ) : null}
 
@@ -523,32 +369,36 @@ export function ChatShell() {
                 </span>
               </div>
               {visibleChannelParentChats.map((parentChat) => {
-                const active =
-                  location.pathname === `/chat/${parentChat.id}` ||
-                  location.pathname.startsWith(`/chat/${parentChat.id}/thread/`)
+                const active = parentChat.id === activeChatId
                 return (
-                  <div
-                    className={cn(
-                      'group mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-body transition',
-                      active
-                        ? 'bg-sidebar-active font-semibold text-sidebar-active-fg'
-                        : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
-                    )}
-                    key={parentChat.id}
-                  >
-                    <Link
-                      className="flex min-w-0 flex-1 items-center gap-1.5 truncate"
-                      params={{ chatId: parentChat.id }}
-                      to="/chat/$chatId"
+                  <Fragment key={parentChat.id}>
+                    <div
+                      className={cn(
+                        'group mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-body transition',
+                        active
+                          ? 'bg-sidebar-active font-semibold text-sidebar-active-fg'
+                          : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
+                      )}
                     >
-                      <Hash className="size-3.5 shrink-0 text-sidebar-fg-dim" />
-                      <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
-                    </Link>
-                    <ChatActionsMenu
-                      onDelete={() => void handleDeleteParentChat(parentChat)}
-                      parentChat={parentChat}
+                      <Link
+                        className="flex min-w-0 flex-1 items-center gap-1.5 truncate"
+                        params={{ chatId: parentChat.id }}
+                        to="/chat/$chatId"
+                      >
+                        <Hash className="size-3.5 shrink-0 text-sidebar-fg-dim" />
+                        <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
+                      </Link>
+                      <ChatActionsMenu
+                        onDelete={() => void handleDeleteParentChat(parentChat)}
+                        parentChat={parentChat}
+                      />
+                    </div>
+                    <ChatBranchesSlot
+                      active={active}
+                      activeThreadId={activeThreadId}
+                      parentChatId={parentChat.id}
                     />
-                  </div>
+                  </Fragment>
                 )
               })}
             </section>
@@ -573,33 +423,39 @@ export function ChatShell() {
                 const active = parentChat.id === activeChatId
 
                 return (
-                  <div
-                    className={cn(
-                      'group mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-body transition',
-                      active
-                        ? 'bg-sidebar-active font-semibold text-sidebar-active-fg'
-                        : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
-                    )}
-                    key={parentChat.id}
-                  >
-                    <Link
-                      className="flex min-w-0 flex-1 items-center gap-1.5 truncate"
-                      params={{ chatId: parentChat.id }}
-                      to="/chat/$chatId"
+                  <Fragment key={parentChat.id}>
+                    <div
+                      className={cn(
+                        'group mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-body transition',
+                        active
+                          ? 'bg-sidebar-active font-semibold text-sidebar-active-fg'
+                          : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
+                      )}
                     >
-                      <DmRowGlyph parentChat={parentChat} />
-                      <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
-                      {branchCount > 0 ? (
-                        <span className="rounded bg-white/10 px-1.5 font-mono text-meta font-semibold text-sidebar-chip">
-                          ↳{branchCount}
-                        </span>
-                      ) : null}
-                    </Link>
-                    <ChatActionsMenu
-                      onDelete={() => void handleDeleteParentChat(parentChat)}
-                      parentChat={parentChat}
+                      <Link
+                        className="flex min-w-0 flex-1 items-center gap-1.5 truncate"
+                        params={{ chatId: parentChat.id }}
+                        to="/chat/$chatId"
+                      >
+                        <DmRowGlyph parentChat={parentChat} />
+                        <span className="min-w-0 flex-1 truncate">{parentChat.title}</span>
+                        {branchCount > 0 ? (
+                          <span className="rounded bg-white/10 px-1.5 font-mono text-meta font-semibold text-sidebar-chip">
+                            ↳{branchCount}
+                          </span>
+                        ) : null}
+                      </Link>
+                      <ChatActionsMenu
+                        onDelete={() => void handleDeleteParentChat(parentChat)}
+                        parentChat={parentChat}
+                      />
+                    </div>
+                    <ChatBranchesSlot
+                      active={active}
+                      activeThreadId={activeThreadId}
+                      parentChatId={parentChat.id}
                     />
-                  </div>
+                  </Fragment>
                 )
               })
             )}
