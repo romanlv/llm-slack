@@ -1,4 +1,4 @@
-import { SILENCE_SENTINEL } from '@/features/chat/decide-to-respond'
+import { silenceSentinel } from '@/features/chat/defaults'
 import type { ProviderConnection } from '@/features/providers/entities'
 import type { ModelRef } from '@/features/providers/model-ref'
 import type {
@@ -6,7 +6,7 @@ import type {
   StreamChatResult,
 } from '@/features/providers/provider-contract'
 
-export { SILENCE_SENTINEL }
+export { silenceSentinel }
 
 export interface FakeProviderCall {
   connection: ProviderConnection
@@ -110,7 +110,7 @@ export function createFakeStreamChat({
       throw output.error
     }
     if ('silent' in output) {
-      const content = SILENCE_SENTINEL
+      const content = silenceSentinel
       input.onChunk(content)
       const id = `${idSeed}-${counter++}`
       input.onMessageId?.(id)

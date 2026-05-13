@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { SILENCE_SENTINEL } from '@/features/chat/decide-to-respond'
+import { silenceSentinel } from '@/features/chat/defaults'
 import type { ProviderConnection } from '@/features/providers/entities'
 import type { ModelRef } from '@/features/providers/model-ref'
 
@@ -47,6 +47,6 @@ describe('createFakeStreamChat', () => {
       messages: [],
       onChunk: () => {},
     })
-    expect(result.content).toBe(SILENCE_SENTINEL)
+    expect(result.content).toBe(silenceSentinel)
   })
 })

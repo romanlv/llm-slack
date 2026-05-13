@@ -1,8 +1,8 @@
 import Dexie from 'dexie'
 
 import { db } from '@/features/chat/database'
+import { channelDefaults } from '@/features/chat/defaults'
 import {
-  DEFAULT_CHANNEL_SETTINGS,
   type ChannelParticipant,
   type ChannelSettings,
   type ParentChat,
@@ -73,7 +73,7 @@ export async function createChannel(input: CreateChannelInput): Promise<ParentCh
 
       const settings: ChannelSettings = {
         id: chat.id,
-        ...DEFAULT_CHANNEL_SETTINGS,
+        ...channelDefaults,
         createdAt: now,
         updatedAt: now,
       }
@@ -173,7 +173,7 @@ export async function addChannelParticipant(
       const mode =
         input.mode ??
         settings?.defaultParticipationMode ??
-        DEFAULT_CHANNEL_SETTINGS.defaultParticipationMode
+        channelDefaults.defaultParticipationMode
       const row: ChannelParticipant = {
         id: crypto.randomUUID(),
         chatId: input.chatId,
@@ -234,7 +234,7 @@ export async function setChannelSettings(
       ? { ...existing, ...updates, updatedAt: now }
       : {
           id: chatId,
-          ...DEFAULT_CHANNEL_SETTINGS,
+          ...channelDefaults,
           ...updates,
           createdAt: now,
           updatedAt: now,

@@ -3,8 +3,8 @@ import { useLiveQuery } from 'dexie-react-hooks'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { channelDefaults } from '@/features/chat/defaults'
 import {
-  DEFAULT_CHANNEL_SETTINGS,
   type ChannelSettings,
   type ParticipationMode,
 } from '@/features/chat/domain'
@@ -20,7 +20,7 @@ type FormState = {
 
 function fromSettings(settings: ChannelSettings | undefined): FormState {
   const base = settings ?? {
-    ...DEFAULT_CHANNEL_SETTINGS,
+    ...channelDefaults,
     id: '',
     createdAt: 0,
     updatedAt: 0,

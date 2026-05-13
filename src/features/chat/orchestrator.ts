@@ -12,7 +12,7 @@ import type {
   ConversationType,
   ParticipationMode,
 } from '@/features/chat/domain'
-import { DEFAULT_CHANNEL_SETTINGS } from '@/features/chat/domain'
+import { channelDefaults } from '@/features/chat/defaults'
 import { parseMentions } from '@/features/chat/mentions'
 import {
   completeMessage,
@@ -98,7 +98,7 @@ export async function runChannelTurn(input: RunChannelTurnInput): Promise<void> 
 
   const settings = (await getChannelSettings(input.chatId)) ?? {
     id: input.chatId,
-    ...DEFAULT_CHANNEL_SETTINGS,
+    ...channelDefaults,
     createdAt: 0,
     updatedAt: 0,
   }

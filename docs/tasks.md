@@ -44,6 +44,7 @@
 Deferred from the multi-agent foundation (see
 `docs/plans/2026-05-10-001-feat-multi-agent-conversations-plan.md`):
 
+- [ ] agent card (model, context )
 - [ ] agent memories and agent tools (R5 future-proofing already in the type)
 - [ ] pluggable orchestration strategies / swappable scheduler
 - [ ] additional participation modes beyond `auto-decide` / `mention-only`

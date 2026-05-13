@@ -1,8 +1,4 @@
-// Start-anchored marker an agent emits to indicate it decided to stay
-// quiet. Chosen here at U7 (HLDD: "likely `<silent>` or a JSON envelope").
-// Test harnesses re-export this from src/test/fake-providers so scripts
-// can produce silence without depending on orchestrator internals.
-export const SILENCE_SENTINEL = '<silent>'
+import { silenceSentinel } from './defaults'
 
 export interface DecideToRespondResult {
   respond: boolean
@@ -17,25 +13,28 @@ export interface DecideToRespondResult {
 
 // Parse an agent's stream output. The wire convention for v0:
 //
-//   - Start-anchored "<silent>" → the agent decided to stay quiet. The
-//     orchestrator records the attempt as 'decided-silent' and writes no
-//     message row.
+//   - Exactly "<silent>", after trimming surrounding whitespace → the
+//     agent decided to stay quiet. The orchestrator records the attempt as
+//     'decided-silent' and writes no message row.
 //   - Otherwise → treat the content as the agent's reply. If the content
 //     leads with a JSON envelope like {"respond": true, "respondIn":
 //     "thread", "content": "..."} we parse it; otherwise the raw content
 //     is the reply.
-//   - An empty / whitespace-only response is treated as silence.
+//   - Empty / whitespace-only output, including parsed JSON with respond=true
+//     but blank/missing content, is treated as no-message fallback. Intentional
+//     silence should use the explicit sentinel; empty output may be a model or
+//     provider bug, but it still must not create an empty message row.
 //
-// Why start-anchored: an agent legitimately mentioning the sentinel string
-// inside its reply (e.g. quoting the docs) should not be misread as
-// silence. The start-anchored rule pairs with a tiny tolerance for
-// surrounding whitespace.
+// Why exact: an agent legitimately mentioning the sentinel string inside
+// its reply (including at the start while explaining it) should not be
+// misread as silence. Trimming allows harmless surrounding whitespace but
+// any extra content means the reply is content.
 export function parseAgentResponse(raw: string): DecideToRespondResult {
   const trimmed = raw.trim()
   if (!trimmed) {
     return { respond: false, content: '' }
   }
-  if (trimmed.startsWith(SILENCE_SENTINEL)) {
+  if (trimmed === silenceSentinel) {
     return { respond: false, content: '' }
   }
 
@@ -45,12 +44,14 @@ export function parseAgentResponse(raw: string): DecideToRespondResult {
       const parsed = JSON.parse(trimmed) as Partial<DecideToRespondResult>
       if (typeof parsed.respond === 'boolean') {
         if (!parsed.respond) return { respond: false, content: '' }
+        const content = typeof parsed.content === 'string' ? parsed.content.trim() : ''
+        if (!content) return { respond: false, content: '' }
         return {
           respond: true,
           ...(parsed.respondIn === 'thread' || parsed.respondIn === 'main'
             ? { respondIn: parsed.respondIn }
             : {}),
-          content: typeof parsed.content === 'string' ? parsed.content : '',
+          content,
         }
       }
     } catch {
@@ -82,7 +83,7 @@ export function buildDecideSystemPrompt(input: DecideSystemPromptInput): string 
     `You are participating in the channel "${input.channelTitle}" with these agents:`,
     roster,
     '',
-    `If you do not have something useful to add, respond with exactly "${SILENCE_SENTINEL}" — your silence is recorded but no message will be posted.`,
+    `If you do not have something useful to add, respond with exactly "${silenceSentinel}" — your silence is recorded but no message will be posted. Do not return an empty message.`,
   ].filter((line): line is string => line !== undefined)
 
   if (input.allowAgentThreading && !input.isInsideThread) {

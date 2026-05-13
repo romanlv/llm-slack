@@ -103,13 +103,6 @@ export interface ChannelSettings {
   updatedAt: number
 }
 
-export const DEFAULT_CHANNEL_SETTINGS: Omit<ChannelSettings, 'id' | 'createdAt' | 'updatedAt'> = {
-  maxChainedSubTurns: 3,
-  maxMessagesPerAgentPerInput: 2,
-  tokenBudgetPerInput: 200_000,
-  defaultParticipationMode: 'auto-decide',
-  allowAgentThreading: true,
-}
 
 // Turn lifecycle (U6+). A turn is one user-initiated send; it may produce
 // one attempt (DM) or many (channel fan-out). Stop reasons:
