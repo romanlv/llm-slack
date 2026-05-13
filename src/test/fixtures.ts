@@ -121,6 +121,7 @@ export async function seedMessageInThread(
 export interface SeedAgentOptions {
   id?: string
   displayName?: string
+  username?: string
   model?: ModelRef
   systemPrompt?: string
   createdAt?: number
@@ -128,9 +129,11 @@ export interface SeedAgentOptions {
 
 export async function seedAgent(options: SeedAgentOptions = {}): Promise<import('@/features/chat/domain').Agent> {
   const now = options.createdAt ?? Date.now()
+  const id = options.id ?? seq('agent')
   const agent = {
-    id: options.id ?? seq('agent'),
+    id,
     displayName: options.displayName ?? `Agent ${counter}`,
+    username: options.username ?? id.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
     model: options.model ?? makeModelRef(),
     systemPrompt: options.systemPrompt ?? '',
     createdAt: now,

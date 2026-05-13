@@ -20,10 +20,12 @@ describe('agents repository', () => {
   it('create + list + update + delete round-trip', async () => {
     const created = await createAgent({
       displayName: 'Critic',
+      username: 'critic',
       model: MODEL,
       systemPrompt: 'You are a critic.',
     })
     expect(created.displayName).toBe('Critic')
+    expect(created.username).toBe('critic')
     expect(created.systemPrompt).toBe('You are a critic.')
 
     const listed = await listAgents()
@@ -40,20 +42,46 @@ describe('agents repository', () => {
 
   it('rejects empty display names on create and update', async () => {
     await expect(
-      createAgent({ displayName: '   ', model: MODEL }),
+      createAgent({ displayName: '   ', username: 'x', model: MODEL }),
     ).rejects.toBeInstanceOf(AgentValidationError)
 
-    const a = await createAgent({ displayName: 'Strategist', model: MODEL })
+    const a = await createAgent({ displayName: 'Strategist', username: 'strat', model: MODEL })
     await expect(
       updateAgent(a.id, { displayName: '' }),
     ).rejects.toBeInstanceOf(AgentValidationError)
   })
 
+  it('rejects malformed usernames and enforces uniqueness', async () => {
+    await expect(
+      createAgent({ displayName: 'Bad', username: 'has spaces', model: MODEL }),
+    ).rejects.toBeInstanceOf(AgentValidationError)
+    await expect(
+      createAgent({ displayName: 'Bad', username: '', model: MODEL }),
+    ).rejects.toBeInstanceOf(AgentValidationError)
+
+    await createAgent({ displayName: 'First', username: 'lead', model: MODEL })
+    await expect(
+      createAgent({ displayName: 'Second', username: 'Lead', model: MODEL }),
+    ).rejects.toBeInstanceOf(AgentValidationError)
+
+    const other = await createAgent({ displayName: 'Other', username: 'other', model: MODEL })
+    await expect(
+      updateAgent(other.id, { username: 'lead' }),
+    ).rejects.toBeInstanceOf(AgentValidationError)
+  })
+
+  it('lowercases usernames on create and update', async () => {
+    const a = await createAgent({ displayName: 'Mixed', username: 'MiXeD', model: MODEL })
+    expect(a.username).toBe('mixed')
+    const renamed = await updateAgent(a.id, { username: 'ReNamed' })
+    expect(renamed.username).toBe('renamed')
+  })
+
   it('orders by createdAt with strictly-monotonic tie-break under a frozen clock', async () => {
     await withFrozenClock(1_000, async (clock) => {
-      const a = await createAgent({ displayName: 'First', model: MODEL })
-      const b = await createAgent({ displayName: 'Second', model: MODEL })
-      const c = await createAgent({ displayName: 'Third', model: MODEL })
+      const a = await createAgent({ displayName: 'First', username: 'first', model: MODEL })
+      const b = await createAgent({ displayName: 'Second', username: 'second', model: MODEL })
+      const c = await createAgent({ displayName: 'Third', username: 'third', model: MODEL })
       // Date.now() pinned at 1000 for all three calls; createdAt must still
       // be strictly monotonic so list() ordering is stable.
       expect(a.createdAt).toBe(1_000)
@@ -67,7 +95,7 @@ describe('agents repository', () => {
   })
 
   it('orphans agent-DMs on delete (parentChats.agentId is cleared)', async () => {
-    const agent = await createAgent({ displayName: 'Lead', model: MODEL })
+    const agent = await createAgent({ displayName: 'Lead', username: 'lead', model: MODEL })
     const chat = await createParentChat({
       kind: 'dm',
       agentId: agent.id,
@@ -83,7 +111,7 @@ describe('agents repository', () => {
   })
 
   it('assertAgentExists returns the row when present and throws when missing', async () => {
-    const agent = await createAgent({ displayName: 'Reviewer', model: MODEL })
+    const agent = await createAgent({ displayName: 'Reviewer', username: 'reviewer', model: MODEL })
     await expect(assertAgentExists(agent.id)).resolves.toMatchObject({ id: agent.id })
     await expect(assertAgentExists('ghost')).rejects.toThrow(/Agent "ghost" does not exist/)
   })

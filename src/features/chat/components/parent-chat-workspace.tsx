@@ -24,10 +24,19 @@ import {
 import { Menu, MenuItem } from '@/components/ui/menu'
 
 import { AgentDot } from '@/features/agents/agent-dot'
-import { getAgent } from '@/features/agents/agents-repository'
+import { getAgent, listAgents } from '@/features/agents/agents-repository'
 import { ChannelSettingsDialog } from '@/features/chat/components/channel-settings-dialog'
+import {
+  MentionAutocomplete,
+  type MentionAutocompleteHandle,
+} from '@/features/chat/components/mention-autocomplete'
+import {
+  applyMentionInsertion,
+  detectMentionQuery,
+  type MentionQuery,
+} from '@/features/chat/components/mention-autocomplete-engine'
 import { MessageMarkdown } from '@/features/chat/components/message-markdown'
-import type { ChannelParticipant, Turn } from '@/features/chat/domain'
+import type { Agent, ChannelParticipant, Turn } from '@/features/chat/domain'
 import {
   getActiveTurnForParentChat,
   interruptActiveTurn,
@@ -795,22 +804,107 @@ function ConversationComposer({
     element.style.height = `${nextHeight}px`
   }, [value])
 
+  // Mention autocomplete — load every defined agent so the popup can
+  // suggest beyond just the channel's current participants. Filtering and
+  // ranking happens inside the popup.
+  const allAgents = useLiveQuery(() => listAgents(), [], [] as Agent[])
+  const [mentionQuery, setMentionQuery] = useState<MentionQuery | null>(null)
+  const autocompleteRef = useRef<MentionAutocompleteHandle | null>(null)
+
+  const refreshMentionQuery = () => {
+    const element = textareaRef.current
+    if (!element) {
+      setMentionQuery(null)
+      return
+    }
+    const caret = element.selectionStart ?? element.value.length
+    setMentionQuery(detectMentionQuery(element.value, caret))
+  }
+
+  const handleSelectAgent = (agent: Agent) => {
+    const element = textareaRef.current
+    if (!element) return
+    const caret = element.selectionStart ?? element.value.length
+    const { value: nextValue, caret: nextCaret } = applyMentionInsertion(
+      element.value,
+      caret,
+      agent,
+    )
+    onChange(nextValue)
+    setMentionQuery(null)
+    // Restore caret position after React applies the new value.
+    queueMicrotask(() => {
+      const el = textareaRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(nextCaret, nextCaret)
+    })
+  }
+
   return (
-    <form className={cn('px-5 pb-3.5 pt-1.5', className)} onSubmit={onSubmit} ref={formRef}>
+    <form className={cn('relative px-5 pb-3.5 pt-1.5', className)} onSubmit={onSubmit} ref={formRef}>
+      <MentionAutocomplete
+        agents={allAgents}
+        onSelect={handleSelectAgent}
+        query={mentionQuery}
+        ref={autocompleteRef}
+      />
       <div className="overflow-hidden rounded-md border border-line-strong bg-surface">
         <div className="flex items-start gap-1.5 px-3 pt-2.5 pb-1">
           <span className="mt-px font-mono text-body text-accent">›</span>
           <textarea
             className="min-h-[22px] flex-1 resize-none border-0 bg-transparent text-body text-ink outline-none placeholder:text-ink-dim"
             disabled={disabled}
-            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => onChange(event.target.value)}
+            onBlur={() => setMentionQuery(null)}
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+              onChange(event.target.value)
+              // Defer the caret read until after onChange-triggered renders
+              // so the query reflects the new value, not the previous one.
+              queueMicrotask(refreshMentionQuery)
+            }}
+            onClick={refreshMentionQuery}
             onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+              const popup = autocompleteRef.current
+              if (mentionQuery && popup) {
+                if (event.key === 'ArrowDown' && popup.next()) {
+                  event.preventDefault()
+                  return
+                }
+                if (event.key === 'ArrowUp' && popup.prev()) {
+                  event.preventDefault()
+                  return
+                }
+                if (event.key === 'Enter' || event.key === 'Tab') {
+                  if (popup.accept()) {
+                    event.preventDefault()
+                    return
+                  }
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setMentionQuery(null)
+                  return
+                }
+              }
+
               if (event.key !== 'Enter' || !event.metaKey || cannotSubmit) {
                 return
               }
 
               event.preventDefault()
               formRef.current?.requestSubmit()
+            }}
+            onKeyUp={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+              // Arrow keys, Home/End, and clicks can move the caret without
+              // changing the value — refresh the query state when that happens.
+              if (
+                event.key === 'ArrowLeft' ||
+                event.key === 'ArrowRight' ||
+                event.key === 'Home' ||
+                event.key === 'End'
+              ) {
+                refreshMentionQuery()
+              }
             }}
             placeholder={placeholder}
             ref={textareaRef}

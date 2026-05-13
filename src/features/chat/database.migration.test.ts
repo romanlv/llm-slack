@@ -464,6 +464,6 @@ describe('schema migrations', () => {
 
   it('module singleton db opens cleanly on a fresh IDB', async () => {
     await db.open()
-    expect(db.verno).toBeGreaterThanOrEqual(8)
+    expect(db.verno).toBeGreaterThanOrEqual(9)
   })
 })

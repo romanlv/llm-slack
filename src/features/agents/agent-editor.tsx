@@ -23,6 +23,7 @@ import type { ProviderConnection } from '@/features/providers/entities'
 import {
   AgentValidationError,
   createAgent,
+  suggestUsernameFromDisplayName,
   updateAgent,
 } from './agents-repository'
 import { AgentDot } from './agent-dot'
@@ -76,6 +77,12 @@ function AgentEditorBody({
   )
 
   const [displayName, setDisplayName] = useState(agent?.displayName ?? '')
+  const [username, setUsername] = useState(agent?.username ?? '')
+  // When creating, leaving the field untouched lets the repository derive
+  // the slug at save time. `usernameTouched` is only consulted for the
+  // create path; on edit it stays true because we always have an
+  // existing value to send.
+  const [usernameTouched, setUsernameTouched] = useState(Boolean(agent))
   const [systemPrompt, setSystemPrompt] = useState(agent?.systemPrompt ?? '')
   // User-selected picker value, or `undefined` until the user touches the
   // dropdown. At submit time we derive the active value from this override
@@ -102,6 +109,7 @@ function AgentEditorBody({
   })
   const pickerValue = pickerOverride ?? defaultPickerValue
   const displayNameId = useId()
+  const usernameId = useId()
   const systemPromptId = useId()
   const modelId = useId()
 
@@ -121,16 +129,23 @@ function AgentEditorBody({
       return
     }
 
+    // When creating, an untouched/blank username triggers the repository's
+    // derive-and-dedupe path. When editing we always send the current
+    // value so explicit clears surface as a validation error.
+    const usernameForCreate = !usernameTouched && !username ? undefined : username
+
     setBusy(true)
     try {
       const saved = isEditing
         ? await updateAgent(agent!.id, {
             displayName,
+            username,
             model: ref,
             systemPrompt,
           })
         : await createAgent({
             displayName,
+            username: usernameForCreate,
             model: ref,
             systemPrompt,
           })
@@ -179,6 +194,39 @@ function AgentEditorBody({
             required
             value={displayName}
           />
+        </div>
+
+        <div className="grid gap-1.5">
+          <label
+            className="font-mono text-meta font-semibold uppercase tracking-wider text-ink-muted"
+            htmlFor={usernameId}
+          >
+            Username
+          </label>
+          <div className="flex items-center gap-2">
+            <span aria-hidden className="font-mono text-body text-ink-dim">@</span>
+            <Input
+              autoComplete="off"
+              className="flex-1"
+              id={usernameId}
+              onChange={(event) => {
+                setUsernameTouched(true)
+                setUsername(event.target.value)
+              }}
+              placeholder={
+                !isEditing && displayName
+                  ? suggestUsernameFromDisplayName(displayName)
+                  : 'critic'
+              }
+              required={isEditing}
+              spellCheck={false}
+              value={username}
+            />
+          </div>
+          <p className="text-small text-ink-muted">
+            One-word handle used to @-mention the agent. Lowercase letters,
+            digits, dashes, or underscores.
+          </p>
         </div>
 
         <div className="grid gap-1.5">

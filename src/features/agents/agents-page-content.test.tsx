@@ -51,6 +51,9 @@ async function seedAgentRow(overrides: Partial<Parameters<typeof createAgent>[0]
   const provider = await seedOpenAIProvider()
   return createAgent({
     displayName: overrides.displayName ?? 'Senior Reviewer',
+    username:
+      overrides.username ??
+      (overrides.displayName ?? 'senior-reviewer').toLowerCase().replace(/[^a-z0-9]+/g, '-'),
     model: overrides.model ?? {
       providerId: provider.id,
       providerKind: 'openai',

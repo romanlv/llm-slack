@@ -9,6 +9,10 @@ export type ChatKind = 'dm' | 'channel'
 export interface Agent {
   id: string
   displayName: string
+  // Short, unique handle used to @-mention the agent in chat. Lowercased,
+  // [a-z0-9_-]+; uniqueness is enforced by the agents store's &username
+  // index (DB v9+).
+  username: string
   // Per-agent model is mandatory — agents are addressable participants and
   // the orchestrator needs a model to call. Null at the row level would
   // require every call site to fall back to the chat's model, which only

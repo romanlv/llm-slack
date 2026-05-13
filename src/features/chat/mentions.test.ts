@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import { parseMentions } from '@/features/chat/mentions'
 
-const critic = { id: 'a-critic', displayName: 'Critic' }
-const strategist = { id: 'a-strat', displayName: 'Strategist' }
-const senior = { id: 'a-senior', displayName: 'Senior' }
-const seniorReviewer = { id: 'a-sr', displayName: 'Senior Reviewer' }
+const critic = { id: 'a-critic', displayName: 'Critic', username: 'critic' }
+const strategist = { id: 'a-strat', displayName: 'Strategist', username: 'strat' }
+const senior = { id: 'a-senior', displayName: 'Senior', username: 'snr' }
+const seniorReviewer = { id: 'a-sr', displayName: 'Senior Reviewer', username: 'sr' }
 
 describe('parseMentions', () => {
   it('matches a single mention case-insensitively', () => {
@@ -65,5 +65,21 @@ describe('parseMentions', () => {
 
   it('only matches at word-start (so cat@critic does not match)', () => {
     expect(parseMentions('cat@critic', [critic])).toEqual([])
+  })
+
+  it('matches by username when the displayName has spaces', () => {
+    expect(parseMentions('hey @sr please weigh in', [seniorReviewer])).toEqual(['a-sr'])
+    expect(parseMentions('hey @SR please', [seniorReviewer])).toEqual(['a-sr'])
+  })
+
+  it('treats username and displayName as equivalent handles for the same agent', () => {
+    // Two different forms of the same agent shouldn't produce duplicate ids.
+    const text = '@strat then later @Strategist again'
+    expect(parseMentions(text, [strategist])).toEqual(['a-strat'])
+  })
+
+  it('still works for candidates without a username (back-compat)', () => {
+    const legacy = { id: 'legacy', displayName: 'Legacy' }
+    expect(parseMentions('@legacy hello', [legacy])).toEqual(['legacy'])
   })
 })

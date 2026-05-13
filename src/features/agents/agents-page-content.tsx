@@ -35,6 +35,7 @@ function AgentRow({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-body font-semibold text-ink">{agent.displayName}</h3>
+          <span className="font-mono text-meta text-accent">@{agent.username}</span>
           <span className="inline-flex items-center gap-1 rounded-full bg-canvas px-2 py-0.5 font-mono text-meta text-ink-muted">
             {modelLabel(agent)}
           </span>

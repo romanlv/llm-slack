@@ -209,7 +209,11 @@ interface SelectCandidatesInput {
 function selectCandidates(input: SelectCandidatesInput): CandidateAgent[] {
   const mentioned = parseMentions(
     input.triggeringEvent.content,
-    Array.from(input.agentsById.values()).map((a) => ({ id: a.id, displayName: a.displayName })),
+    Array.from(input.agentsById.values()).map((a) => ({
+      id: a.id,
+      displayName: a.displayName,
+      username: a.username,
+    })),
   )
 
   const out: CandidateAgent[] = []

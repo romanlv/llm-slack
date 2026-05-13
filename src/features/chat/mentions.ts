@@ -1,16 +1,21 @@
 export interface MentionCandidate {
   id: string
   displayName: string
+  // Short @-handle for the agent. Falls back to displayName when callers
+  // haven't loaded a username (e.g. very old fixtures), so the parser
+  // still works against pre-username candidates.
+  username?: string
 }
 
 /**
  * Find which mention candidates are referenced in `text`.
  *
  * Matching rules (v0):
- * - Mentions are written as `@<display-name>`.
- * - Case-insensitive against candidate.displayName.
- * - Greedy longest-match: when multiple candidates share a prefix (e.g.
- *   "Senior" and "Senior Reviewer"), the longest matching name wins.
+ * - Mentions are written as `@<display-name>` OR `@<username>`.
+ * - Case-insensitive against both candidate.displayName and candidate.username.
+ * - Greedy longest-match across both forms: when multiple candidates share a
+ *   prefix (e.g. "Senior" and "Senior Reviewer"), the longest matching name
+ *   wins. Username matches are also considered in the same pool.
  * - Text inside fenced code blocks (``` ... ```) and inline code (`...`) is
  *   excluded — those segments are stripped before scanning.
  * - Email-shaped tokens (e.g. `user@example.com`) are skipped — the `@`
@@ -24,12 +29,21 @@ export function parseMentions(text: string, candidates: MentionCandidate[]): str
   if (candidates.length === 0 || !text) return []
 
   const scrubbed = stripCode(text)
-  // Sort candidates by displayName length, longest first, so the regex
-  // alternation prefers longer matches. Without this, "Senior" would match
-  // before "Senior Reviewer" had a chance.
-  const sorted = [...candidates].sort(
-    (a, b) => b.displayName.length - a.displayName.length,
-  )
+
+  // Flatten each candidate into one or more (handle, id) entries so the
+  // longest-match scan can consider displayName and username uniformly.
+  interface Handle {
+    id: string
+    handle: string
+  }
+  const handles: Handle[] = []
+  for (const c of candidates) {
+    handles.push({ id: c.id, handle: c.displayName })
+    if (c.username && c.username !== c.displayName) {
+      handles.push({ id: c.id, handle: c.username })
+    }
+  }
+  const sorted = handles.sort((a, b) => b.handle.length - a.handle.length)
 
   const matchedIds = new Set<string>()
   const result: string[] = []
@@ -41,19 +55,19 @@ export function parseMentions(text: string, candidates: MentionCandidate[]): str
     if (/[a-z0-9._-]/i.test(prev)) continue
 
     const rest = scrubbed.slice(cursor + 1)
-    for (const candidate of sorted) {
-      const head = rest.slice(0, candidate.displayName.length)
-      if (head.toLowerCase() !== candidate.displayName.toLowerCase()) continue
+    for (const entry of sorted) {
+      const head = rest.slice(0, entry.handle.length)
+      if (head.toLowerCase() !== entry.handle.toLowerCase()) continue
       // Don't match if the next char is alphanumeric — that would mean
       // we matched a prefix of a longer word that isn't another candidate.
-      const next = rest[candidate.displayName.length] ?? ''
+      const next = rest[entry.handle.length] ?? ''
       if (/[a-z0-9_]/i.test(next)) continue
 
-      if (!matchedIds.has(candidate.id)) {
-        matchedIds.add(candidate.id)
-        result.push(candidate.id)
+      if (!matchedIds.has(entry.id)) {
+        matchedIds.add(entry.id)
+        result.push(entry.id)
       }
-      cursor += candidate.displayName.length
+      cursor += entry.handle.length
       break
     }
   }
