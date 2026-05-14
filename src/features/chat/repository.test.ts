@@ -562,10 +562,28 @@ describe('thread repository semantics', () => {
   })
 
   it('seeds the first conversation once when called concurrently', async () => {
+    const { demoSeed } = await import('@/features/chat/demo-seed')
     await Promise.all([ensureSeedParentChat(), ensureSeedParentChat()])
 
     await expect(db.parentChats.count()).resolves.toBe(1)
-    await expect(db.messages.count()).resolves.toBe(1)
+    await expect(db.agents.count()).resolves.toBe(demoSeed.agents.length)
+    const channel = await db.parentChats.toCollection().first()
+    expect(channel?.kind).toBe('channel')
+    expect(channel?.title).toBe(demoSeed.channel.title)
+
+    // Parent-channel messages and any threads roll up to one total.
+    const expectedMessageCount = demoSeed.messages.reduce(
+      (sum, spec) => sum + 1 + (spec.thread?.length ?? 0),
+      0,
+    )
+    await expect(db.messages.count()).resolves.toBe(expectedMessageCount)
+
+    // Channel participants for the parent, plus a snapshot per thread.
+    const threadCount = demoSeed.messages.filter((m) => m.thread?.length).length
+    await expect(db.chatParticipants.count()).resolves.toBe(
+      demoSeed.agents.length * (1 + threadCount),
+    )
+    await expect(db.threads.count()).resolves.toBe(threadCount)
   })
 
   it('deletes a parent chat with all owned threads and messages in one cascade', async () => {

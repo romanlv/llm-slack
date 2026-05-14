@@ -22,6 +22,7 @@
 - [ ] out of credits state
 - [ ] prompt caching
 - [ ] mobile view
+- [ ] demo channel - features
 
 # planned
 

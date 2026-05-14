@@ -141,31 +141,132 @@ export async function findOrCreateEmptyParentChat() {
 }
 
 async function seedParentChatIfNeeded() {
+  // Idempotency gate: any pre-existing parent chat (demo, user-created,
+  // or imported) suppresses the seed. We never overwrite existing data.
   const count = await db.parentChats.count()
   if (count > 0) {
     await getSettings()
     return
   }
 
-  const parentChat = await createParentChat({ title: 'Welcome chat' })
+  const { createAgent } = await import('@/features/agents/agents-repository')
+  const {
+    createChannel,
+    setChannelSettings,
+  } = await import('@/features/chat/channels-repository')
+  const { demoSeed } = await import('@/features/chat/demo-seed')
 
-  await db.messages.add({
-    id: crypto.randomUUID(),
-    conversationType: 'parent',
-    conversationId: parentChat.id,
-    parentChatId: parentChat.id,
-    role: 'assistant',
-    content:
-      'llm-slack is ready. Use the main conversation for the primary path, then open threads from specific messages.',
-    createdAt: Date.now(),
-    status: 'complete',
-    directReplyCount: 0,
-    model: parentChat.model ?? undefined,
+  // Public APIs validate input and apply current defaults, so this seed
+  // automatically picks up new defaultable fields without changes here.
+  const agents = await Promise.all(
+    demoSeed.agents.map((spec) =>
+      createAgent({
+        displayName: spec.displayName,
+        username: spec.username,
+        model: spec.model,
+        systemPrompt: spec.systemPrompt,
+        chattiness: spec.chattiness,
+      }),
+    ),
+  )
+  const agentByUsername = new Map(agents.map((agent) => [agent.username, agent]))
+
+  const channel = await createChannel({
+    title: demoSeed.channel.title,
+    participants: agents.map((agent) => ({ agentId: agent.id })),
+  })
+  await setChannelSettings(channel.id, {
+    description: demoSeed.channel.description,
+    systemPrompt: demoSeed.channel.systemPrompt,
   })
 
-  await db.parentChats.update(parentChat.id, {
-    lastActivityPreview: 'Open a thread from any message.',
-    updatedAt: Date.now(),
+  // Messages are baked directly: they need precise control over
+  // `agentSnapshot` and `model` so the rendered cast keeps its identity
+  // even if the user later deletes or edits the seeded agents.
+  // Stable, strictly-increasing timestamps come from a single counter so
+  // parent and thread messages share one ordering domain.
+  let nextTime = Date.now()
+  const stamp = () => {
+    const value = nextTime
+    nextTime += 1
+    return value
+  }
+
+  const buildMessage = (
+    spec: { from: string; content: string },
+    overrides: { conversationType: ConversationType; conversationId: string },
+    directReplyCount: number,
+  ): ChatMessage => {
+    if (spec.from === 'user') {
+      return {
+        id: crypto.randomUUID(),
+        conversationType: overrides.conversationType,
+        conversationId: overrides.conversationId,
+        parentChatId: channel.id,
+        role: 'user',
+        content: spec.content,
+        createdAt: stamp(),
+        status: 'complete',
+        directReplyCount,
+      }
+    }
+    const agent = agentByUsername.get(spec.from)
+    if (!agent) {
+      throw new Error(
+        `demoSeed message references unknown @${spec.from}; check demo-seed.ts`,
+      )
+    }
+    return {
+      id: crypto.randomUUID(),
+      conversationType: overrides.conversationType,
+      conversationId: overrides.conversationId,
+      parentChatId: channel.id,
+      role: 'assistant',
+      content: spec.content,
+      createdAt: stamp(),
+      status: 'complete',
+      directReplyCount,
+      model: agent.model,
+      agentId: agent.id,
+      agentSnapshot: {
+        displayName: agent.displayName,
+        model: agent.model,
+      },
+    }
+  }
+
+  // First pass: parent-channel messages. The reply count is derived from
+  // the spec's nested thread length, so the chip cannot disagree with the
+  // thread it points at.
+  const parentMessages = demoSeed.messages.map((spec) =>
+    buildMessage(
+      spec,
+      { conversationType: 'parent', conversationId: channel.id },
+      spec.thread?.length ?? 0,
+    ),
+  )
+  await db.messages.bulkAdd(parentMessages)
+
+  // Second pass: any nested threads. `getOrCreateThreadForMessage` handles
+  // the participant snapshot (R17) and depth bookkeeping for us.
+  for (const [index, spec] of demoSeed.messages.entries()) {
+    if (!spec.thread || spec.thread.length === 0) continue
+    const rootMessage = parentMessages[index]!
+    const thread = await getOrCreateThreadForMessage(rootMessage.id)
+    const threadMessages = spec.thread.map((threadSpec) =>
+      buildMessage(
+        threadSpec,
+        { conversationType: 'thread', conversationId: thread.id },
+        0,
+      ),
+    )
+    await db.messages.bulkAdd(threadMessages)
+  }
+
+  const lastMessage = demoSeed.messages.at(-1)
+  await db.parentChats.update(channel.id, {
+    lastActivityPreview: lastMessage ? previewText(lastMessage.content) : '',
+    updatedAt: nextTime,
   })
 }
 
