@@ -167,6 +167,99 @@ describe('ParentChatWorkspace', () => {
     })
   })
 
+  describe('parent draft persistence', () => {
+    // The composer holds draft text in local state and only writes to Dexie on
+    // a 400ms debounce (plus flushes on submit, blur, and unmount). Per-keystroke
+    // writes used to retrigger useLiveQuery(loadConversationPanes), re-rendering
+    // the whole workspace and making typing visibly slow on busy chats.
+
+    const mountAndFindComposer = async () => {
+      render(<ParentChatWorkspace chatId="parent-1" />)
+      return (await screen.findByPlaceholderText(
+        'Ask anything, or /branch to fork this convo...',
+      )) as HTMLTextAreaElement
+    }
+
+    const submitByKeyboard = async (textarea: HTMLTextAreaElement) => {
+      textarea.focus()
+      await userEvent.keyboard('{Meta>}{Enter}{/Meta}')
+    }
+
+    it('debounces draft writes so a typing burst lands as a single Dexie update', async () => {
+      await db.parentChats.add(parentChat())
+      const updateSpy = vi.spyOn(db.parentChats, 'update')
+
+      const textarea = await mountAndFindComposer()
+      await userEvent.type(textarea, 'hello world')
+
+      // Each keystroke resets the debounce — so during the burst we expect
+      // zero writes, not eleven. Allow up to 1 in case the trailing timer
+      // happens to fire before the assertion runs.
+      expect(updateSpy.mock.calls.length).toBeLessThanOrEqual(1)
+
+      await waitFor(async () => {
+        expect(await db.parentChats.get('parent-1')).toMatchObject({ draft: 'hello world' })
+      })
+      expect(updateSpy).toHaveBeenCalledTimes(1)
+      updateSpy.mockRestore()
+    })
+
+    it('flushes the pending draft before submit so the freshly typed value is sent', async () => {
+      mockedSendParentChatTurn.mockResolvedValueOnce(undefined)
+      await db.parentChats.add(parentChat())
+
+      const textarea = await mountAndFindComposer()
+      // Type then submit immediately — before the debounce timer would fire.
+      await userEvent.type(textarea, 'send me')
+      await submitByKeyboard(textarea)
+
+      await waitFor(() => {
+        expect(mockedSendParentChatTurn).toHaveBeenCalledWith('parent-1', 'send me')
+      })
+    })
+
+    it('clears the composer after a successful send and keeps it after a failure', async () => {
+      mockedSendParentChatTurn
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('boom'))
+      await db.parentChats.add(parentChat())
+
+      const textarea = await mountAndFindComposer()
+
+      await userEvent.type(textarea, 'first')
+      await submitByKeyboard(textarea)
+      await waitFor(() => {
+        expect(mockedSendParentChatTurn).toHaveBeenNthCalledWith(1, 'parent-1', 'first')
+      })
+      await waitFor(() => expect(textarea.value).toBe(''))
+
+      await userEvent.type(textarea, 'second')
+      await submitByKeyboard(textarea)
+      await waitFor(() => {
+        expect(mockedSendParentChatTurn).toHaveBeenNthCalledWith(2, 'parent-1', 'second')
+      })
+      // Send rejected — the user shouldn't lose what they typed.
+      expect(textarea.value).toBe('second')
+    })
+
+    it('persists the in-flight draft when the workspace unmounts', async () => {
+      await db.parentChats.add(parentChat())
+
+      const { unmount } = render(<ParentChatWorkspace chatId="parent-1" />)
+      const textarea = (await screen.findByPlaceholderText(
+        'Ask anything, or /branch to fork this convo...',
+      )) as HTMLTextAreaElement
+
+      await userEvent.type(textarea, 'in flight')
+      // Unmount before the debounce timer fires — cleanup must flush.
+      unmount()
+
+      await waitFor(async () => {
+        expect(await db.parentChats.get('parent-1')).toMatchObject({ draft: 'in flight' })
+      })
+    })
+  })
+
   it('shows an explicit missing thread state and disables the thread composer', async () => {
     await db.parentChats.add(parentChat())
 

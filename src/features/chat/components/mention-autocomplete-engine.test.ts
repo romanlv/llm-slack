@@ -16,6 +16,7 @@ function agent(displayName: string, username: string): Agent {
     username,
     model: makeModelRef(),
     systemPrompt: '',
+    chattiness: 2,
     createdAt: now,
     updatedAt: now,
   }

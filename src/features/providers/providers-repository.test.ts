@@ -61,6 +61,7 @@ describe('providers repository cascade delete', () => {
       username: 'critic',
       model: { providerId: provider.id, providerKind: 'openrouter' as const, providerModelId: 'm-1' },
       systemPrompt: '',
+      chattiness: 2 as const,
       createdAt: 1,
       updatedAt: 1,
     }

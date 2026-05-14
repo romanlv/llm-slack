@@ -768,30 +768,87 @@ function ContextMeter({ compact, usage }: { compact?: boolean; usage?: ProviderU
   )
 }
 
+// Debounce persisting the draft to IndexedDB. The textarea is uncontrolled
+// from Dexie's perspective: typing only mutates local React state, and writes
+// land on a timer + final flushes on submit, blur, and unmount. Without this,
+// every keystroke fired a Dexie update → useLiveQuery(loadConversationPanes)
+// re-ran → the whole workspace (every MessageBlock and sibling live query)
+// re-rendered, making typing visibly slow on busy conversations.
+const DRAFT_PERSIST_DEBOUNCE_MS = 400
+
 function ConversationComposer({
   className,
   disabled,
-  onChange,
+  initialValue,
+  onPersist,
   onSubmit,
   placeholder,
   submitDisabled,
   tone,
   usage,
-  value,
 }: {
   className?: string
   disabled?: boolean
-  onChange: (value: string) => void
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  initialValue: string
+  onPersist: (value: string) => void
+  onSubmit: (value: string) => boolean | Promise<boolean>
   placeholder: string
   submitDisabled?: boolean
   tone: ComposerTone
   usage?: ProviderUsage
-  value: string
 }) {
   const cannotSubmit = disabled || submitDisabled
   const formRef = useRef<HTMLFormElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const [value, setValue] = useState(initialValue)
+
+  // Refs let the debounce timer and unmount cleanup read the latest values
+  // without rebinding the timer or effect on every keystroke.
+  const valueRef = useRef(value)
+  const persistedRef = useRef(initialValue)
+  const persistRef = useRef(onPersist)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    valueRef.current = value
+    persistRef.current = onPersist
+  })
+
+  const flushPersist = () => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+    if (persistedRef.current === valueRef.current) return
+    persistedRef.current = valueRef.current
+    persistRef.current(valueRef.current)
+  }
+
+  const schedulePersist = () => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current)
+    }
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null
+      if (persistedRef.current === valueRef.current) return
+      persistedRef.current = valueRef.current
+      persistRef.current(valueRef.current)
+    }, DRAFT_PERSIST_DEBOUNCE_MS)
+  }
+
+  // Flush any pending draft on unmount so chat/thread switches and full
+  // tab teardowns don't drop in-flight characters.
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+      if (persistedRef.current !== valueRef.current) {
+        persistedRef.current = valueRef.current
+        persistRef.current(valueRef.current)
+      }
+    }
+  }, [])
 
   useLayoutEffect(() => {
     const element = textareaRef.current
@@ -830,7 +887,8 @@ function ConversationComposer({
       caret,
       agent,
     )
-    onChange(nextValue)
+    setValue(nextValue)
+    schedulePersist()
     setMentionQuery(null)
     // Restore caret position after React applies the new value.
     queueMicrotask(() => {
@@ -841,8 +899,29 @@ function ConversationComposer({
     })
   }
 
+  const handleFormSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (cannotSubmit) return
+    // Cancel the pending debounce: we're about to send, so a stale write
+    // racing against markParentDraftSent (which clears the draft) would
+    // resurrect already-sent text in the row.
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+    const current = valueRef.current
+    const succeeded = await onSubmit(current)
+    if (succeeded) {
+      // Upstream (markParentDraftSent / markThreadDraftSent) has already
+      // cleared the row; pin persistedRef so a future schedulePersist call
+      // doesn't write the now-stale empty over a freshly typed draft.
+      persistedRef.current = ''
+      setValue('')
+    }
+  }
+
   return (
-    <form className={cn('relative px-5 pb-3.5 pt-1.5', className)} onSubmit={onSubmit} ref={formRef}>
+    <form className={cn('relative px-5 pb-3.5 pt-1.5', className)} onSubmit={handleFormSubmit} ref={formRef}>
       <MentionAutocomplete
         agents={allAgents}
         onSelect={handleSelectAgent}
@@ -855,9 +934,13 @@ function ConversationComposer({
           <textarea
             className="min-h-[22px] flex-1 resize-none border-0 bg-transparent text-body text-ink outline-none placeholder:text-ink-dim"
             disabled={disabled}
-            onBlur={() => setMentionQuery(null)}
+            onBlur={() => {
+              setMentionQuery(null)
+              flushPersist()
+            }}
             onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-              onChange(event.target.value)
+              setValue(event.target.value)
+              schedulePersist()
               // Defer the caret read until after onChange-triggered renders
               // so the query reflects the new value, not the previous one.
               queueMicrotask(refreshMentionQuery)
@@ -1413,12 +1496,12 @@ function MissingBranchPlaceholder({ onClose }: { onClose: () => void }) {
       </div>
       <ConversationComposer
         disabled
-        onChange={() => undefined}
-        onSubmit={(event) => event.preventDefault()}
+        initialValue=""
+        onPersist={() => undefined}
+        onSubmit={() => false}
         placeholder="Continue this branch, or /branch to fork again..."
         submitDisabled
         tone="thread"
-        value=""
       />
     </div>
   )
@@ -1434,14 +1517,14 @@ function ThreadPane({
   activeTurn,
   availableModels,
   avatarDataUrl,
-  draft,
+  initialDraft,
   error,
   hasUsableProvider,
   messages,
   onCancelTurn,
   onClose,
   onDelete,
-  onDraftChange,
+  onPersistDraft,
   onModelChange,
   onOpenChildThread,
   onSubmit,
@@ -1464,17 +1547,17 @@ function ThreadPane({
   activeTurn?: Turn
   availableModels: EffectiveModel[]
   avatarDataUrl?: string
-  draft: string
+  initialDraft: string
   error: string | null
   hasUsableProvider: boolean
   messages: ChatMessage[]
   onCancelTurn: () => void
   onClose?: () => void
   onDelete: () => void | Promise<void>
-  onDraftChange: (value: string) => void
+  onPersistDraft: (value: string) => void
   onModelChange: (value: string) => void
   onOpenChildThread: (messageId: string) => void
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onSubmit: (value: string) => boolean | Promise<boolean>
   onTogglePin: (messageId: string) => Promise<void>
   onToggleSaved: (messageId: string) => Promise<void>
   pinnedMessageIds: Set<string>
@@ -1579,13 +1662,13 @@ function ThreadPane({
         ) : null}
         <ConversationComposer
           disabled={sending || archived}
-          onChange={onDraftChange}
+          initialValue={initialDraft}
+          onPersist={onPersistDraft}
           onSubmit={onSubmit}
           placeholder="Continue this branch, or /branch to fork again..."
           submitDisabled={!hasUsableProvider}
           tone="thread"
           usage={usage}
-          value={draft}
         />
       </div>
     </div>
@@ -1910,21 +1993,24 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
   const makeThreadSavedToggler = (paneThreadId: string) =>
     makeThreadActionToggler(paneThreadId, toggleSavedMessage, 'Could not update saved message.')
 
-  const handleParentSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-
-    const prompt = parentChat.draft.trim()
-    if (!prompt || sendingParent) {
-      return
+  // Returns true when the send completed cleanly so the composer can clear
+  // its local draft; false (or a thrown error captured here) keeps whatever
+  // the user typed in place for retry.
+  const handleParentSubmit = async (prompt: string): Promise<boolean> => {
+    const trimmed = prompt.trim()
+    if (!trimmed || sendingParent) {
+      return false
     }
 
     setParentError(null)
     setSendingParent(true)
 
     try {
-      await sendParentChatTurn(parentChat.id, prompt)
+      await sendParentChatTurn(parentChat.id, trimmed)
+      return true
     } catch (error) {
       setParentError(error instanceof Error ? error.message : 'Request failed.')
+      return false
     } finally {
       setSendingParent(false)
     }
@@ -1934,21 +2020,21 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
   // depth ≥ 2, side whenever a branch is open) submit through the same code
   // path keyed by their own thread id.
   const makeThreadSubmitHandler = (thread: ConversationThread) =>
-    async (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-
-      const prompt = thread.draft.trim()
-      if (!prompt || sendingThreadId === thread.id) {
-        return
+    async (prompt: string): Promise<boolean> => {
+      const trimmed = prompt.trim()
+      if (!trimmed || sendingThreadId === thread.id) {
+        return false
       }
 
       setThreadError(thread.id, null)
       setSendingThreadId(thread.id)
 
       try {
-        await sendThreadTurn(thread.id, prompt)
+        await sendThreadTurn(thread.id, trimmed)
+        return true
       } catch (error) {
         setThreadError(thread.id, error instanceof Error ? error.message : 'Request failed.')
+        return false
       } finally {
         setSendingThreadId((currentThreadId) =>
           currentThreadId === thread.id ? null : currentThreadId,
@@ -2136,13 +2222,14 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
                 sendingParent ||
                 Boolean(parentChat.archivedAt)
               }
-              onChange={(value) => void saveParentDraft(parentChat.id, value)}
+              initialValue={parentChat.draft}
+              key={parentChat.id}
+              onPersist={(value) => void saveParentDraft(parentChat.id, value)}
               onSubmit={handleParentSubmit}
               placeholder="Ask anything, or /branch to fork this convo..."
               submitDisabled={!hasUsableProvider}
               tone="parent"
               usage={parentUsage}
-              value={parentChat.draft}
             />
           </div>
         </section>
@@ -2161,7 +2248,8 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
             activeTurn={activeTurn}
             availableModels={availableModels}
             avatarDataUrl={avatarDataUrl}
-            draft={mainView.thread.draft}
+            initialDraft={mainView.thread.draft}
+            key={mainView.thread.id}
             error={threadErrors[mainView.thread.id] ?? null}
             hasUsableProvider={hasUsableProvider}
             messages={mainThreadMessages}
@@ -2194,7 +2282,7 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
                 )
               }
             }}
-            onDraftChange={(value) => void saveThreadDraft(mainView.thread.id, value)}
+            onPersistDraft={(value) => void saveThreadDraft(mainView.thread.id, value)}
             onModelChange={(value) =>
               void setThreadModel(mainView.thread.id, pickerValueToRef(value))
             }
@@ -2226,14 +2314,15 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
               activeTurn={activeTurn}
               availableModels={availableModels}
               avatarDataUrl={avatarDataUrl}
-              draft={sideView.thread.draft}
+              initialDraft={sideView.thread.draft}
+              key={sideView.thread.id}
               error={threadErrors[sideView.thread.id] ?? null}
               hasUsableProvider={hasUsableProvider}
               messages={sideThreadMessages}
               onCancelTurn={() => void interruptActiveTurn(parentChat.id)}
               onClose={() => void popSideBranch()}
               onDelete={deleteSideBranch}
-              onDraftChange={(value) => void saveThreadDraft(sideView.thread.id, value)}
+              onPersistDraft={(value) => void saveThreadDraft(sideView.thread.id, value)}
               onModelChange={(value) =>
                 void setThreadModel(sideView.thread.id, pickerValueToRef(value))
               }
