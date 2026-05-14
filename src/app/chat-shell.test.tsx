@@ -228,10 +228,10 @@ describe('ChatShell chat actions', () => {
     expect(
       await screen.findByRole('link', { name: /model-dm/i }),
     ).toBeInTheDocument()
-    // Agent-DM rows live under their own Agents group, not Recent. The
-    // section header is "Agents" and there is at least one link with the
+    // Agent-DM rows live under their own group, not Recent. The section
+    // header is "DMs with Agents" and there is at least one link with the
     // chat's title pointing at the chat URL.
-    expect(await screen.findByText(/^agents$/i)).toBeInTheDocument()
+    expect(await screen.findByText(/^dms with agents$/i)).toBeInTheDocument()
     const pmLensLinks = await screen.findAllByRole('link', { name: /pm lens/i })
     expect(
       pmLensLinks.some((link) => link.getAttribute('href') === '/chat/agent-1'),
