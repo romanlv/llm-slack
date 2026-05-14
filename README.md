@@ -1,13 +1,19 @@
 # llm-slack
 
-llm-slack is a browser-first LLM chat workspace inspired by Slack.
+llm-slack is an experimental, browser-first LLM workspace for collective AI
+conversations — channels with multiple agents, message-level threads when ideas
+need their own path, pins and saved notes for what's worth keeping.
 
-Most AI chat tools are one long flat transcript. llm-slack experiments with a
-different shape: keep the main conversation readable, then branch into
-message-level threads when an idea needs its own side path.
+Most AI chat tools are one long flat transcript with one model. llm-slack
+explores a different shape: think with a room of AIs at once, branch off when
+one reply deserves its own path, and keep the main conversation readable.
 
-The project is currently a deployed, local-first prototype. You can try the
-hosted app on GitHub Pages:
+This is a deliberately experimental prototype — the goal is to figure out
+which shapes of multi-agent chat are actually useful. Feedback is welcome via
+[issues](https://github.com/romanlv/llm-slack/issues) or
+[discussions](https://github.com/romanlv/llm-slack/discussions).
+
+You can try the hosted app on GitHub Pages:
 
 ```text
 https://romanlv.github.io/llm-slack/
@@ -24,18 +30,21 @@ LLM workflow without making users learn a completely new navigation model.
 
 LLM conversations get messy quickly. A single chat can contain planning,
 debugging, follow-up questions, rejected ideas, and useful snippets all mixed
-together.
+together. And one model rarely has every angle — a planner, a critic, and a
+domain specialist often beat any one of them alone.
 
 llm-slack is exploring a more work-oriented interface:
 
-- conversations live in a sidebar like channels
-- any message can open a focused thread
+- channels can host multiple agents, each with their own @handle, model,
+  system prompt, and chattiness dial
+- any message can open a focused thread when a side path needs its own room
 - threads keep their own draft, model, and message history
 - saved messages and pins make useful context easy to find again
 - everything persists locally so the app is easy to test without a backend
 
-The goal is not to clone Slack. The goal is to make LLM work feel easier to
-organize when one conversation starts turning into several related decisions.
+The goal is not to clone Slack. The goal is to make AI work feel easier to
+organize when one conversation starts turning into several decisions, and to
+let more than one mind weigh in when that helps.
 
 ## Current Status
 
@@ -50,6 +59,12 @@ The big pieces already in place are:
 - message actions for editing, deleting, copying, pinning, and saving
 - saved messages, pinned messages, starred conversations, and archives
 - responsive conversation + thread layout
+
+Currently experimenting with:
+
+- channels with multiple agents — @-handles, per-agent models, per-agent
+  chattiness dial, channel-level house rules and follow-up modes
+- how agents should decide when to chime in versus stay silent
 
 More features will be built over time. See [docs/tasks.md](docs/tasks.md) for
 the current working backlog and planned direction.
@@ -212,7 +227,13 @@ tests.
 
 ## Roadmap Direction
 
-Near term, llm-slack is focused on becoming a better local LLM workbench:
+Currently exploring:
+
+- multi-agent channels — when agents should speak, how follow-up should chain,
+  how house rules should shape the room
+- agent identity — handles, per-agent models, system prompts, chattiness
+
+Near term, llm-slack is also focused on becoming a better local LLM workbench:
 
 - more reliable send/retry/regenerate flows
 - richer search and navigation
@@ -220,5 +241,5 @@ Near term, llm-slack is focused on becoming a better local LLM workbench:
 - clearer branch maps
 - better handling of free/out-of-credit provider states
 
-Longer term, the project may grow toward workspaces/projects, agent definitions,
-multi-agent conversations, and a backend boundary for secure provider access.
+Longer term, the project may grow toward workspaces/projects, richer agent
+definitions, and a backend boundary for secure provider access.

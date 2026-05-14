@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Bookmark, Database, GitBranch, Hash, Pin } from 'lucide-react'
+import { Bookmark, Database, GitBranch, Hash, Users } from 'lucide-react'
 
+import { AgentDot } from '@/features/agents/agent-dot'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { NewChatModal } from '@/features/chat/components/new-chat-modal'
@@ -8,24 +9,24 @@ import heroImage from '@/assets/hero.png'
 
 const pillars = [
   {
-    icon: Hash,
-    title: 'Conversations in the sidebar',
-    body: 'Keep each workstream separate, star active ones, and jump back into recent or archived chats.',
+    icon: Users,
+    title: 'Multi-agent channels',
+    body: 'Add agents with their own prompts and models. Mention them when you want input.',
   },
   {
     icon: GitBranch,
-    title: 'Threads from any message',
-    body: 'Branch from a specific point, keep the root visible, and continue without muddying the main conversation.',
+    title: 'Threads',
+    body: 'Start a thread from any message, so the main channel stays readable.',
   },
   {
     icon: Bookmark,
-    title: 'Saved and pinned context',
-    body: 'Save messages globally, pin important replies inside a conversation, and return to source threads later.',
+    title: 'Save important replies',
+    body: 'Pin or save replies you want to find again later.',
   },
   {
     icon: Database,
-    title: 'Local-first by default',
-    body: 'Chats, threads, drafts, settings, pins, and saved messages stay in browser storage.',
+    title: 'Runs in your browser',
+    body: 'Chats and settings stay in local browser storage. No account required.',
   },
 ]
 
@@ -40,17 +41,21 @@ export function HomePage() {
           <Badge>llm-slack</Badge>
         </div>
         <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-tight text-ink md:text-5xl">
-          Chat with AI like you work in Slack.
+          Chat with multiple AI agents in channels and threads.
         </h1>
         <p className="mt-5 max-w-2xl text-base leading-7 text-ink-muted md:text-lg">
-          Use llm-slack to turn model conversations into a local workspace with
-          sidebar chats, message threads, saved replies, pins, and
-          per-conversation model choices.
+          llm-slack is an open-source experiment for keeping AI conversations
+          organized. Create channels, add agents, start threads, and save
+          the replies worth keeping.
         </p>
         <div className="mt-5 grid max-w-2xl grid-cols-2 gap-2 text-small text-ink-muted sm:grid-cols-4">
           <span className="inline-flex items-center gap-1.5 rounded border border-line bg-white px-2.5 py-1.5">
             <Hash className="size-3.5 text-accent" />
-            Chats
+            Channels
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded border border-line bg-white px-2.5 py-1.5">
+            <Users className="size-3.5 text-accent" />
+            Agents
           </span>
           <span className="inline-flex items-center gap-1.5 rounded border border-line bg-white px-2.5 py-1.5">
             <GitBranch className="size-3.5 text-accent" />
@@ -60,15 +65,22 @@ export function HomePage() {
             <Bookmark className="size-3.5 text-accent" />
             Saved
           </span>
-          <span className="inline-flex items-center gap-1.5 rounded border border-line bg-white px-2.5 py-1.5">
-            <Pin className="size-3.5 text-accent" />
-            Pins
-          </span>
         </div>
-        <div className="mt-8 flex flex-wrap gap-3">
+        <div className="mt-8 flex flex-wrap items-center gap-4">
           <Button onClick={() => setNewChatOpen(true)} size="lg">
             Start a conversation
           </Button>
+          <p className="text-small text-ink-muted">
+            Prototype. Ideas and rough edges welcome.{' '}
+            <a
+              className="text-accent underline-offset-4 hover:underline"
+              href="https://github.com/romanlv/llm-slack/issues"
+              rel="noreferrer"
+              target="_blank"
+            >
+              Open an issue.
+            </a>
+          </p>
         </div>
       </section>
 
@@ -83,44 +95,65 @@ export function HomePage() {
           <div className="grid grid-cols-[136px_minmax(0,1fr)]">
             <div className="space-y-2 border-r border-line bg-sidebar px-3 py-4 text-sidebar-fg">
               <div className="font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
-                Starred
+                Channels
               </div>
               <div className="rounded bg-sidebar-active px-2 py-1.5 text-small font-semibold text-white">
                 # release-plan
               </div>
               <div className="px-2 py-1 text-small"># prompts</div>
               <div className="pt-3 font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
-                This conversation
+                Agents
               </div>
-              <div className="flex items-center gap-1 px-2 py-1 text-small text-sidebar-chip">
-                <GitBranch className="size-3" />
-                pricing branch
+              <div className="flex items-center gap-1.5 px-2 py-1 text-small text-sidebar-chip">
+                <AgentDot agentId="planner" displayName="Planner" size="sm" />
+                @planner
+              </div>
+              <div className="flex items-center gap-1.5 px-2 py-1 text-small text-sidebar-chip">
+                <AgentDot agentId="critic" displayName="Critic" size="sm" />
+                @critic
               </div>
             </div>
             <div className="min-w-0 bg-white p-4">
               <div className="mb-3 flex items-center justify-between border-b border-line pb-2">
                 <div>
                   <p className="text-heading font-bold text-ink"># release-plan</p>
-                  <p className="text-meta text-ink-muted">3 messages · 2 branches</p>
+                  <p className="text-meta text-ink-muted">2 agents · 1 thread</p>
                 </div>
-                <Pin className="size-4 text-accent" />
+                <GitBranch className="size-4 text-accent" />
               </div>
               <div className="space-y-3">
                 <div className="rounded border border-line bg-surface-muted p-3">
                   <p className="text-small font-semibold text-ink">You</p>
                   <p className="mt-1 text-small leading-5 text-ink-muted">
-                    Draft the launch checklist and split risk notes into a thread.
+                    Draft the launch checklist. @planner @critic - push back on
+                    risky assumptions.
                   </p>
                 </div>
                 <div className="rounded border border-line bg-white p-3 shadow-[0_10px_26px_-24px_rgba(15,23,42,0.65)]">
-                  <p className="text-small font-semibold text-ink">Assistant</p>
-                  <p className="mt-1 text-small leading-5 text-ink-muted">
-                    Here is the main plan. I opened a branch for pricing risk.
+                  <div className="flex items-center gap-2">
+                    <AgentDot agentId="planner" displayName="Planner" size="sm" />
+                    <p className="text-small font-semibold text-ink">@planner</p>
+                    <span className="text-meta text-ink-muted">gpt-5</span>
+                  </div>
+                  <p className="mt-1.5 text-small leading-5 text-ink-muted">
+                    Main path looks sound. Pricing risk should move into its
+                    own thread.
                   </p>
                   <div className="mt-2 inline-flex items-center gap-1 rounded bg-surface-muted px-2 py-1 text-meta text-accent">
                     <GitBranch className="size-3" />
                     2 replies
                   </div>
+                </div>
+                <div className="rounded border border-line bg-white p-3 shadow-[0_10px_26px_-24px_rgba(15,23,42,0.65)]">
+                  <div className="flex items-center gap-2">
+                    <AgentDot agentId="critic" displayName="Critic" size="sm" />
+                    <p className="text-small font-semibold text-ink">@critic</p>
+                    <span className="text-meta text-ink-muted">claude-opus-4-7</span>
+                  </div>
+                  <p className="mt-1.5 text-small leading-5 text-ink-muted">
+                    The rollout assumes a clean migration. Add rollback
+                    criteria before launch.
+                  </p>
                 </div>
               </div>
             </div>
