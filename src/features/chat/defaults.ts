@@ -9,7 +9,7 @@
 //   • Constants — read every operation, never persisted. Editing takes
 //                 effect on the next call.
 
-import type { Agent, ChannelSettings, ChattinessLevel } from './domain'
+import type { Agent, ChannelSettings, ChattinessLevel, ParticipationMode } from './domain'
 
 // ─── Seeds ───────────────────────────────────────────────────────────
 
@@ -21,8 +21,17 @@ import type { Agent, ChannelSettings, ChattinessLevel } from './domain'
  * settings field forces an update here at compile time.
  */
 export const channelDefaults: Omit<ChannelSettings, 'id' | 'createdAt' | 'updatedAt'> = {
+  /** Free-text room topic. Empty until the channel owner sets one. */
+  description: '',
+  /** Channel-wide house rules. Empty until the channel owner sets one. */
+  systemPrompt: '',
   /** Fan-out steps per user input. 0 disables agent-to-agent chains. */
   maxChainedSubTurns: 3,
+  /**
+   * Default follow-up eligibility. `auto-decide` matches today's behavior —
+   * any participant may chain a reply through the decide-to-respond loop.
+   */
+  chainFollowupMode: 'auto-decide',
   /** Per-agent message ceiling within one user-initiated turn. */
   maxMessagesPerAgentPerInput: 2,
   /**
@@ -32,12 +41,6 @@ export const channelDefaults: Omit<ChannelSettings, 'id' | 'createdAt' | 'update
    * docs/tasks.md follow-ups).
    */
   tokenBudgetPerInput: 200_000,
-  /**
-   * Mode applied to newly added participants — also the pre-fill in the
-   * add-to-channel modal. Per-participant overrides live on
-   * `chatParticipants.mode`.
-   */
-  defaultParticipationMode: 'auto-decide',
   /**
    * Whether agents may emit `respondIn: 'thread'`. Slack-like behavior
    * is the v0 default; channel owners can disable to keep replies pinned
@@ -62,6 +65,15 @@ export const agentDefaults: Pick<Agent, 'systemPrompt' | 'chattiness'> = {
 }
 
 // ─── Live constants ──────────────────────────────────────────────────
+
+/**
+ * Participation mode stamped onto a brand-new channel participant when
+ * the caller doesn't supply one. Per-participant `chatParticipants.mode`
+ * is the source of truth once set; this only chooses the seed value.
+ * Not per-channel — channel-level overrides were dropped as redundant
+ * (every participant row is one click away from being changed).
+ */
+export const newParticipantMode: ParticipationMode = 'auto-decide'
 
 /**
  * The exact string an agent emits to decline this step. The parser trims

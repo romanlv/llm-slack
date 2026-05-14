@@ -20,7 +20,7 @@ describe('ChannelSettingsPanel', () => {
   it('seeds the form from existing settings and persists edits to maxChainedSubTurns', async () => {
     const channel = await createChannel({ title: 'launch' })
 
-    render(<ChannelSettingsPanel chatId={channel.id} />)
+    render(<ChannelSettingsPanel chatId={channel.id} section="advanced" />)
 
     const subTurnsInput = (await screen.findByLabelText(
       /max chained sub-turns/i,
@@ -43,7 +43,7 @@ describe('ChannelSettingsPanel', () => {
   it('toggles allowAgentThreading off and persists', async () => {
     const channel = await createChannel({ title: 'no-threads' })
 
-    render(<ChannelSettingsPanel chatId={channel.id} />)
+    render(<ChannelSettingsPanel chatId={channel.id} section="advanced" />)
 
     const toggle = (await screen.findByLabelText(
       /agents may open threads/i,
@@ -64,7 +64,7 @@ describe('ChannelSettingsPanel', () => {
   it('rejects negative caps with a visible error', async () => {
     const channel = await createChannel({ title: 'bad-caps' })
 
-    render(<ChannelSettingsPanel chatId={channel.id} />)
+    render(<ChannelSettingsPanel chatId={channel.id} section="advanced" />)
 
     const subTurnsInput = (await screen.findByLabelText(
       /max chained sub-turns/i,
@@ -86,24 +86,52 @@ describe('ChannelSettingsPanel', () => {
     expect(settings?.maxChainedSubTurns).toBe(3)
   })
 
-  it('changes the defaultParticipationMode through the select', async () => {
-    const channel = await createChannel({ title: 'mode-switch' })
+  it('edits description and house rules in the general section', async () => {
+    const channel = await createChannel({ title: 'general' })
 
-    render(<ChannelSettingsPanel chatId={channel.id} />)
+    render(<ChannelSettingsPanel chatId={channel.id} section="general" />)
 
-    const modeSelect = (await screen.findByLabelText(
-      /default participation mode/i,
-    )) as HTMLSelectElement
-    await waitFor(() => expect(modeSelect.value).toBe('auto-decide'))
+    const descriptionInput = (await screen.findByLabelText(
+      /^description$/i,
+    )) as HTMLTextAreaElement
+    await waitFor(() => expect(descriptionInput.value).toBe(''))
 
-    await userEvent.selectOptions(modeSelect, 'mention-only')
+    await userEvent.type(descriptionInput, 'planning room')
+
+    const houseRules = (await screen.findByLabelText(
+      /house rules/i,
+    )) as HTMLTextAreaElement
+    await userEvent.type(houseRules, 'be terse')
+
     await userEvent.click(
       screen.getByRole('button', { name: /save settings/i }),
     )
 
     await waitFor(async () => {
       const settings = await getChannelSettings(channel.id)
-      expect(settings?.defaultParticipationMode).toBe('mention-only')
+      expect(settings?.description).toBe('planning room')
+      expect(settings?.systemPrompt).toBe('be terse')
+    })
+  })
+
+  it('changes the chainFollowupMode through the select', async () => {
+    const channel = await createChannel({ title: 'followup' })
+
+    render(<ChannelSettingsPanel chatId={channel.id} section="advanced" />)
+
+    const modeSelect = (await screen.findByLabelText(
+      /follow-up chain mode/i,
+    )) as HTMLSelectElement
+    await waitFor(() => expect(modeSelect.value).toBe('auto-decide'))
+
+    await userEvent.selectOptions(modeSelect, 'mentions-only')
+    await userEvent.click(
+      screen.getByRole('button', { name: /save settings/i }),
+    )
+
+    await waitFor(async () => {
+      const settings = await getChannelSettings(channel.id)
+      expect(settings?.chainFollowupMode).toBe('mentions-only')
     })
   })
 })

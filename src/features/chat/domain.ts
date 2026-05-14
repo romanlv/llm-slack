@@ -85,6 +85,13 @@ export interface AgentMessageSnapshot {
 
 export type ParticipationMode = 'auto-decide' | 'mention-only'
 
+// Per-channel rule governing whether an agent's reply may itself trigger
+// further agent replies in the same user-initiated turn. 'none' caps the
+// turn at the first round of agent responses, 'mentions-only' lets agents
+// follow up only when explicitly @-mentioned in a prior reply, and
+// 'auto-decide' opens the full decide-to-respond loop for follow-ups.
+export type ChainFollowupMode = 'none' | 'mentions-only' | 'auto-decide'
+
 // Per-channel-per-agent participation row. chatId points to a parentChats
 // row with kind='channel' in U5; U11 extends this to also accept threads.id.
 export interface ChannelParticipant {
@@ -100,10 +107,19 @@ export interface ChannelParticipant {
 
 export interface ChannelSettings {
   id: string // === chatId
+  // Free-text room topic. Shown in the channel header and injected as
+  // <description> in the channel transport prompt. Empty by default.
+  description: string
+  // Channel-wide house rules. Injected as <house_rules> in the channel
+  // transport prompt. Distinct from a per-agent systemPrompt — applies to
+  // every participant in the room. Empty by default.
+  systemPrompt: string
   maxChainedSubTurns: number
+  // Whether agent replies may themselves trigger further agent replies in
+  // the same turn. See ChainFollowupMode for the semantics.
+  chainFollowupMode: ChainFollowupMode
   maxMessagesPerAgentPerInput: number
   tokenBudgetPerInput: number
-  defaultParticipationMode: ParticipationMode
   // Slack-like behavior is the v0 default; channel owners can disable to
   // keep replies pinned to the main timeline (R14e).
   allowAgentThreading: boolean

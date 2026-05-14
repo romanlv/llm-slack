@@ -40,9 +40,10 @@ checking the current implementation.
   new-chat creation, and expand to show that agent's chats.
 - [x] Agent-DM empty responses should be dropped with no assistant message row.
   Current code persists a fallback empty-response message.
-- [ ] The richer XML channel prompt (`<description>`, `<house_rules>`,
-  public roster role/bio, `<your_role>`) needs schema fields and prompt
-  builder support.
+- [~] The richer XML channel prompt landed for `<description>`,
+  `<house_rules>`, `<participation>`, `<conventions>`, and `<your_role>`.
+  Public roster `role` / `bio` per-agent fields still need schema +
+  editor + roster wiring.
 - [ ] Channel transport should include snapshotted agent author attribution for
   prior assistant messages so agents can tell who said what even after renames
   or deletes.
@@ -247,8 +248,11 @@ Components:
   that stays private character.
 - **`<your_role>`** — the agent's own `systemPrompt`. Last, so it's the
   most-recent instruction the model attends to.
-- **`<conventions>`** — silence sentinel, threading instruction. Always
-  present.
+- **`<conventions>`** — silence sentinel always. The threading
+  instruction (`{"respond": true, "respondIn": "thread", …}`) appears
+  only when `channelSettings.allowAgentThreading` is true *and* the
+  current attempt is not already inside a thread; otherwise it's
+  omitted.
 
 Conversation messages follow. Target channel transport renders agent
 messages with snapshotted author attribution in the text body
@@ -271,8 +275,7 @@ which keeps the agent from confusing the two.
 | Stage | Status | File | What it builds |
 | --- | --- | --- | --- |
 | Agent DM prefix | Current | [`src/features/chat/send-turn.ts:84-99`](../src/features/chat/send-turn.ts) | Prepends `agent.systemPrompt` as `{role:'system'}` if non-empty. |
-| Channel decide-to-respond | Current lightweight version | [`src/features/chat/decide-to-respond.ts:77-95`](../src/features/chat/decide-to-respond.ts) | Combines agent prompt + roster + silence convention + optional threading instruction. |
-| Rich XML channel prompt | Target | See checklist | Adds channel description, house rules, public role/bio roster, and explicit `<your_role>` / `<conventions>` sections. |
+| Channel decide-to-respond | Current | [`src/features/chat/decide-to-respond.ts`](../src/features/chat/decide-to-respond.ts) | XML-tagged: `<channel>{name, description?, house_rules?, participants}` → `<participation>` (silence-first + chattiness) → `<conventions>` (silence sentinel, threading envelope) → optional `<your_role>` with the agent's `systemPrompt`. Public roster `role` / `bio` still pending (agent schema). |
 | Channel response parser | Current | [`src/features/chat/decide-to-respond.ts:33-62`](../src/features/chat/decide-to-respond.ts) | Parses `<silent>` / empty / JSON-envelope / raw content. |
 
 There is no *workspace-global* system prompt. Channel-level
@@ -564,8 +567,7 @@ already encodes the intended behavior.
 | `model` (`ModelRef`) | Provider, model, context window | required |
 | `systemPrompt` | Voice, character, domain emphasis — **private** (the agent's own character; never shown to other agents) | empty |
 | `composedPrompt` | When `true`, tuning fragments (chattiness, primary-responder bias, etc.) compose into the prompt automatically. When `false`, only `systemPrompt` is sent — escape hatch for hand-crafted agents. `role` and `bio` still propagate to other agents regardless. | `true` |
-| `defaultChattiness` | Initial chattiness (integer 1-5) when the agent joins a new channel | `3` (mid) |
-| `defaultParticipationMode` | Initial mode (`auto-decide` / `mention-only`) when added to a new channel | `auto-decide` |
+| `chattiness` | The agent's own chattiness (1-5). Read directly by the orchestrator when this agent is a channel candidate. Per-channel override is a planned future field; for now this is the only chattiness source. | `2` (reserved) |
 
 ### Per channel
 
@@ -580,9 +582,15 @@ On the `channelSettings` table. Shape the room itself.
 | `chainFollowupMode` | Whether agent replies can trigger no follow-up, mention-only follow-up, or auto-decide follow-up | from `channel-defaults.ts` |
 | `maxMessagesPerAgentPerInput` | Per-agent ceiling per turn | from `channel-defaults.ts` |
 | `tokenBudgetPerInput` | Turn-wide cost ceiling (planned) | from `channel-defaults.ts` |
-| `defaultParticipationMode` | Mode applied to newly added participants | from `channel-defaults.ts` |
-| `defaultChattiness` | Chattiness applied to newly added participants | from `channel-defaults.ts` |
 | `allowAgentThreading` | Whether agents may choose `respondIn: 'thread'` | `true` |
+
+Channel-level pre-fills for newly added participants (`defaultParticipationMode`,
+`defaultChattiness`) were intentionally **not** stored on the row.
+Mode is one click to change on the participant once added; channel-wide
+chattiness override had no orchestrator consumer. The new-participant
+mode seed lives as a code constant (`newParticipantMode` in
+`defaults.ts`) and per-participant chattiness is tracked on the agent
+row only until a real override use-case appears.
 
 ### Per agent-in-channel
 
@@ -591,8 +599,8 @@ in this specific room.
 
 | Field | Tunes | Default |
 | --- | --- | --- |
-| `mode` | `auto-decide` / `mention-only` | inherited from channel default |
-| `chattiness` | Integer 1-5 (applies only when `mode='auto-decide'`). Maps to a prompt fragment + UI codename via `channel-defaults.ts` | inherited from channel default |
+| `mode` | `auto-decide` / `mention-only` | `newParticipantMode` constant (`auto-decide`) |
+| `chattiness` | Integer 1-5 (applies only when `mode='auto-decide'`). Maps to a prompt fragment + UI codename via `channel-defaults.ts`. **Not yet overridable per channel** — reads from the agent row. | inherited from agent's `chattiness` |
 
 ### Developer-facing config (the experimentation file)
 
@@ -611,11 +619,10 @@ the orchestrator and gauge use.
 | `channelDefaults.chainFollowupMode` | Default follow-up eligibility mode (`none` / `mentions-only` / `auto-decide`) |
 | `channelDefaults.maxMessagesPerAgentPerInput` | Default for new channels |
 | `channelDefaults.tokenBudgetPerInput` | Default for new channels |
-| `channelDefaults.defaultParticipationMode` | Default for new channels |
-| `channelDefaults.defaultChattiness` | Default for new channels |
 | `channelDefaults.allowAgentThreading` | Default for new channels |
-| `agentDefaults.defaultChattiness` | Default for new agents |
-| `agentDefaults.defaultParticipationMode` | Default for new agents |
+| `newParticipantMode` | Mode stamped onto a brand-new participant when the caller doesn't supply one. Not per-channel; participant rows are one click to change once added. |
+| `agentDefaults.chattiness` | Default chattiness for new agents |
+| `agentDefaults.systemPrompt` | Default system prompt for new agents (empty) |
 | `chattinessLevels[1..5]` | Per-level `{ codename, promptFragment }` consumed by both UI (slider label) and orchestrator (decide-prompt fragment) |
 | `prompts.decideToRespond` | The template used by `buildDecideSystemPrompt` |
 | `silenceSentinel` | The string an agent emits to decline (default `<silent>`) |

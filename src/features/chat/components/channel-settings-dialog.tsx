@@ -7,11 +7,12 @@ import { cn } from '@/lib/utils'
 import { ChannelParticipantsPanel } from './channel-participants-panel'
 import { ChannelSettingsPanel } from './channel-settings-panel'
 
-type Tab = 'agents' | 'behavior'
+type Tab = 'agents' | 'general' | 'advanced'
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'agents', label: 'Agents' },
-  { id: 'behavior', label: 'Behavior' },
+  { id: 'general', label: 'General' },
+  { id: 'advanced', label: 'Advanced' },
 ]
 
 export function ChannelSettingsDialog({
@@ -97,7 +98,12 @@ function ChannelSettingsDialogBody({
 
         <div className="overflow-y-auto px-6 py-5" role="tabpanel">
           {tab === 'agents' ? <ChannelParticipantsPanel chatId={chatId} /> : null}
-          {tab === 'behavior' ? <ChannelSettingsPanel chatId={chatId} /> : null}
+          {tab === 'general' ? (
+            <ChannelSettingsPanel chatId={chatId} section="general" />
+          ) : null}
+          {tab === 'advanced' ? (
+            <ChannelSettingsPanel chatId={chatId} section="advanced" />
+          ) : null}
         </div>
       </div>
     </>

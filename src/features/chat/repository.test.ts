@@ -330,7 +330,7 @@ describe('thread repository semantics', () => {
 
     await setChannelSettings(channel.id, { maxChainedSubTurns: 1 })
     const settings = await getChannelSettings(channel.id)
-    expect(settings).toMatchObject({ maxChainedSubTurns: 1, defaultParticipationMode: 'auto-decide' })
+    expect(settings).toMatchObject({ maxChainedSubTurns: 1, chainFollowupMode: 'auto-decide' })
 
     await withFrozenClock(5000, async () => {
       const pa = await addChannelParticipant({ chatId: channel.id, agentId: a.id })
@@ -472,7 +472,7 @@ describe('thread repository semantics', () => {
 
     const settings = await getChannelSettings(channel.id)
     expect(settings).toBeDefined()
-    expect(settings?.defaultParticipationMode).toBe('auto-decide')
+    expect(settings?.chainFollowupMode).toBe('auto-decide')
     expect(settings?.allowAgentThreading).toBe(true)
 
     const participants = await listChannelParticipants(channel.id)

@@ -1,7 +1,7 @@
 import Dexie from 'dexie'
 
 import { db } from '@/features/chat/database'
-import { channelDefaults } from '@/features/chat/defaults'
+import { channelDefaults, newParticipantMode } from '@/features/chat/defaults'
 import {
   type ChannelParticipant,
   type ChannelSettings,
@@ -86,7 +86,7 @@ export async function createChannel(input: CreateChannelInput): Promise<ParentCh
         id: crypto.randomUUID(),
         chatId: chat.id,
         agentId: participant.agentId,
-        mode: participant.mode ?? settings.defaultParticipationMode,
+        mode: participant.mode ?? newParticipantMode,
         sortKey: baseSortKey + index,
         createdAt: now,
       }))
@@ -146,7 +146,7 @@ export async function addChannelParticipant(
 ): Promise<ChannelParticipant> {
   return db.transaction(
     'rw',
-    [db.chatParticipants, db.parentChats, db.agents, db.channelSettings],
+    [db.chatParticipants, db.parentChats, db.agents],
     async () => {
       await assertChannelChat(input.chatId)
       const agent = await db.agents.get(input.agentId)
@@ -169,11 +169,7 @@ export async function addChannelParticipant(
         .reverse()
         .first()
       const sortKey = Math.max(now, (latest?.sortKey ?? 0) + 1)
-      const settings = await db.channelSettings.get(input.chatId)
-      const mode =
-        input.mode ??
-        settings?.defaultParticipationMode ??
-        channelDefaults.defaultParticipationMode
+      const mode = input.mode ?? newParticipantMode
       const row: ChannelParticipant = {
         id: crypto.randomUUID(),
         chatId: input.chatId,

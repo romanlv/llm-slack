@@ -289,6 +289,8 @@ async function runOneAttempt(input: RunOneAttemptInput): Promise<RunOneAttemptRe
         : await getParentConversation(input.triggeringEvent.parentChatId)
     const systemPrompt = buildDecideSystemPrompt({
       channelTitle,
+      channelDescription: channelSettings.description,
+      channelSystemPrompt: channelSettings.systemPrompt,
       participants: input.participantsForRoster,
       agentSystemPrompt: candidate.agent.systemPrompt,
       chattiness: candidate.agent.chattiness,

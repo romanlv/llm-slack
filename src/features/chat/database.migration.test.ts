@@ -49,7 +49,7 @@ const LEGACY_SCHEMA_CHAIN: Array<Record<string, string>> = [
     savedMessages: 'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
     settings: 'id',
   },
-  // v5 — providers + modelOverrides
+  // v5 — providers + modelOverrides (last version that shipped on main)
   {
     parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt',
     threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
@@ -60,74 +60,6 @@ const LEGACY_SCHEMA_CHAIN: Array<Record<string, string>> = [
     savedMessages: 'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
     providers: 'id, kind, createdAt',
     modelOverrides: 'id, providerId, &[providerId+providerModelId]',
-    settings: 'id',
-  },
-  // v6 — agents + kind/agentId on parentChats
-  {
-    parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
-    threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
-    messages:
-      'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
-    pinnedMessages:
-      'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
-    savedMessages: 'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
-    providers: 'id, kind, createdAt',
-    modelOverrides: 'id, providerId, &[providerId+providerModelId]',
-    agents: 'id, createdAt, updatedAt',
-    settings: 'id',
-  },
-  // v7 — chatParticipants + channelSettings
-  {
-    parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
-    threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
-    messages:
-      'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
-    pinnedMessages:
-      'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
-    savedMessages: 'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
-    providers: 'id, kind, createdAt',
-    modelOverrides: 'id, providerId, &[providerId+providerModelId]',
-    agents: 'id, createdAt, updatedAt',
-    chatParticipants: 'id, chatId, agentId, [chatId+sortKey], &[chatId+agentId]',
-    channelSettings: 'id',
-    settings: 'id',
-  },
-  // v8 — turns + providerRequestAttempts
-  {
-    parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
-    threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
-    messages:
-      'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
-    pinnedMessages:
-      'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
-    savedMessages: 'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
-    providers: 'id, kind, createdAt',
-    modelOverrides: 'id, providerId, &[providerId+providerModelId]',
-    agents: 'id, createdAt, updatedAt',
-    chatParticipants: 'id, chatId, agentId, [chatId+sortKey], &[chatId+agentId]',
-    channelSettings: 'id',
-    turns: 'id, parentChatId, conversationId, status, [conversationId+createdAt]',
-    providerRequestAttempts:
-      'id, turnId, assistantMessageId, agentId, [turnId+attemptNumber]',
-    settings: 'id',
-  },
-  // v9 — addressable agent handles (&username index)
-  {
-    parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
-    threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
-    messages:
-      'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
-    pinnedMessages:
-      'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
-    savedMessages: 'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
-    providers: 'id, kind, createdAt',
-    modelOverrides: 'id, providerId, &[providerId+providerModelId]',
-    agents: 'id, createdAt, updatedAt, &username',
-    chatParticipants: 'id, chatId, agentId, [chatId+sortKey], &[chatId+agentId]',
-    channelSettings: 'id',
-    turns: 'id, parentChatId, conversationId, status, [conversationId+createdAt]',
-    providerRequestAttempts:
-      'id, turnId, assistantMessageId, agentId, [turnId+attemptNumber]',
     settings: 'id',
   },
 ]
@@ -310,7 +242,7 @@ describe('schema migrations', () => {
     }
   })
 
-  it('v5 → v6: backfills parentChats.kind to "dm" and seeds the empty agents store', async () => {
+  it('v5 → v6: backfills parentChats.kind to "dm" and seeds the empty multi-agent stores', async () => {
     await seedLegacyAt(5, async (legacy) => {
       await legacy.table('parentChats').put({
         id: 'parent-legacy',
@@ -330,6 +262,10 @@ describe('schema migrations', () => {
       expect(parent?.kind).toBe('dm')
       expect(parent?.agentId).toBeUndefined()
       expect(await upgraded.agents.count()).toBe(0)
+      expect(await upgraded.chatParticipants.count()).toBe(0)
+      expect(await upgraded.channelSettings.count()).toBe(0)
+      expect(await upgraded.turns.count()).toBe(0)
+      expect(await upgraded.providerRequestAttempts.count()).toBe(0)
     } finally {
       upgraded.close()
     }
@@ -358,166 +294,8 @@ describe('schema migrations', () => {
     }
   })
 
-  it('v6 → v7: pre-existing data preserved, channel tables start empty', async () => {
-    await seedLegacyAt(6, async (legacy) => {
-      await legacy.table('parentChats').put({
-        id: 'p',
-        title: 'dm',
-        model: { providerKind: 'openrouter', providerModelId: 'm' },
-        kind: 'dm',
-        createdAt: 1,
-        updatedAt: 1,
-        draft: '',
-        lastActivityPreview: '',
-      })
-      await legacy.table('agents').put({
-        id: 'a',
-        displayName: 'Critic',
-        model: { providerKind: 'openrouter', providerModelId: 'm' },
-        systemPrompt: '',
-        createdAt: 1,
-        updatedAt: 1,
-      })
-    })
-
-    const upgraded = await openUpgraded()
-    try {
-      expect(upgraded.verno).toBeGreaterThanOrEqual(7)
-      expect(await upgraded.parentChats.count()).toBe(1)
-      expect(await upgraded.agents.count()).toBe(1)
-      expect(await upgraded.chatParticipants.count()).toBe(0)
-      expect(await upgraded.channelSettings.count()).toBe(0)
-    } finally {
-      upgraded.close()
-    }
-  })
-
-  it('v7 → v8: turn-lifecycle tables added empty without touching existing rows', async () => {
-    await seedLegacyAt(7, async (legacy) => {
-      await legacy.table('parentChats').put({
-        id: 'p',
-        title: 'dm',
-        model: { providerKind: 'openrouter', providerModelId: 'm' },
-        kind: 'dm',
-        createdAt: 1,
-        updatedAt: 1,
-        draft: '',
-        lastActivityPreview: '',
-      })
-    })
-
-    const upgraded = await openUpgraded()
-    try {
-      expect(upgraded.verno).toBeGreaterThanOrEqual(8)
-      expect(await upgraded.parentChats.count()).toBe(1)
-      expect(await upgraded.turns.count()).toBe(0)
-      expect(await upgraded.providerRequestAttempts.count()).toBe(0)
-    } finally {
-      upgraded.close()
-    }
-  })
-
-  it('chatParticipants.chatId accepts a threads.id under v8 (no schema change needed for U11)', async () => {
-    // Boot at v8 with a channel + thread + a thread-scoped participant
-    // already on disk. Reopening through the production schema must keep
-    // the row intact — assertChannelChat is what differentiates "thread
-    // under a channel" from "thread under a DM" at write time.
-    await seedLegacyAt(8, async (legacy) => {
-      await legacy.table('parentChats').put({
-        id: 'channel',
-        title: 'c',
-        model: null,
-        kind: 'channel',
-        agentId: null,
-        createdAt: 1,
-        updatedAt: 1,
-        draft: '',
-        lastActivityPreview: '',
-      })
-      await legacy.table('agents').put({
-        id: 'agent',
-        displayName: 'A',
-        model: { providerKind: 'openrouter', providerModelId: 'm' },
-        systemPrompt: '',
-        createdAt: 1,
-        updatedAt: 1,
-      })
-      await legacy.table('threads').put({
-        id: 'thread-1',
-        parentChatId: 'channel',
-        rootMessageId: 'root',
-        depth: 1,
-        draft: '',
-        model: null,
-        createdAt: 1,
-        updatedAt: 1,
-      })
-      // Channel-scoped row.
-      await legacy.table('chatParticipants').put({
-        id: 'p-channel',
-        chatId: 'channel',
-        agentId: 'agent',
-        mode: 'auto-decide',
-        sortKey: 1,
-        createdAt: 1,
-      })
-      // Thread-scoped row.
-      await legacy.table('chatParticipants').put({
-        id: 'p-thread',
-        chatId: 'thread-1',
-        agentId: 'agent',
-        mode: 'auto-decide',
-        sortKey: 2,
-        createdAt: 1,
-      })
-    })
-
-    const upgraded = await openUpgraded()
-    try {
-      expect(upgraded.verno).toBeGreaterThanOrEqual(8)
-      expect(await upgraded.chatParticipants.count()).toBe(2)
-    } finally {
-      upgraded.close()
-    }
-  })
-
-  it('v9 → v10: backfills agents.chattiness to the reserved default', async () => {
-    await seedLegacyAt(9, async (legacy) => {
-      await legacy.table('agents').put({
-        id: 'legacy-agent',
-        displayName: 'Critic',
-        username: 'critic',
-        model: { providerKind: 'openrouter', providerModelId: 'm' },
-        systemPrompt: '',
-        createdAt: 1,
-        updatedAt: 1,
-      })
-      await legacy.table('agents').put({
-        id: 'already-set',
-        displayName: 'Pre-set',
-        username: 'preset',
-        model: { providerKind: 'openrouter', providerModelId: 'm' },
-        systemPrompt: '',
-        chattiness: 5,
-        createdAt: 1,
-        updatedAt: 1,
-      })
-    })
-
-    const upgraded = await openUpgraded()
-    try {
-      expect(upgraded.verno).toBeGreaterThanOrEqual(10)
-      const backfilled = await upgraded.agents.get('legacy-agent')
-      expect(backfilled?.chattiness).toBe(2)
-      const preset = await upgraded.agents.get('already-set')
-      expect(preset?.chattiness).toBe(5)
-    } finally {
-      upgraded.close()
-    }
-  })
-
   it('module singleton db opens cleanly on a fresh IDB', async () => {
     await db.open()
-    expect(db.verno).toBeGreaterThanOrEqual(10)
+    expect(db.verno).toBeGreaterThanOrEqual(6)
   })
 })

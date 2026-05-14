@@ -1,6 +1,6 @@
 import { useId, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Plus, Trash2, UserPlus } from 'lucide-react'
+import { Pencil, Plus, Trash2, UserPlus } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { AgentDot } from '@/features/agents/agent-dot'
@@ -33,6 +33,7 @@ export function ChannelParticipantsPanel({ chatId }: { chatId: string }) {
   const [pendingAgentId, setPendingAgentId] = useState<string>('')
   const [error, setError] = useState('')
   const [editorOpen, setEditorOpen] = useState(false)
+  const [editingAgent, setEditingAgent] = useState<Agent | undefined>(undefined)
   const selectId = useId()
 
   const handleAdd = async () => {
@@ -120,6 +121,19 @@ export function ChannelParticipantsPanel({ chatId }: { chatId: string }) {
                   }}
                   value={participant.mode}
                 />
+                {agent ? (
+                  <Button
+                    aria-label={`Edit ${displayName}`}
+                    onClick={() => {
+                      setEditingAgent(agent)
+                      setEditorOpen(true)
+                    }}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    <Pencil className="size-3.5 text-ink-muted" />
+                  </Button>
+                ) : null}
                 <Button
                   aria-label={`Remove ${displayName} from channel`}
                   onClick={() => removeChannelParticipant(chatId, participant.agentId)}
@@ -144,7 +158,10 @@ export function ChannelParticipantsPanel({ chatId }: { chatId: string }) {
         {agents.length === 0 ? (
           <div className="flex flex-wrap items-center justify-between gap-2 text-small text-ink-muted">
             <span>No agents in your library yet.</span>
-            <Button onClick={() => setEditorOpen(true)} size="sm">
+            <Button onClick={() => {
+                setEditingAgent(undefined)
+                setEditorOpen(true)
+              }} size="sm">
               <UserPlus className="size-4" /> Create new agent
             </Button>
           </div>
@@ -178,7 +195,10 @@ export function ChannelParticipantsPanel({ chatId }: { chatId: string }) {
               <span>Need a different one?</span>
               <button
                 className="inline-flex items-center gap-1.5 font-mono text-meta font-semibold text-accent transition hover:underline"
-                onClick={() => setEditorOpen(true)}
+                onClick={() => {
+                setEditingAgent(undefined)
+                setEditorOpen(true)
+              }}
                 type="button"
               >
                 <UserPlus className="size-3.5" /> Create new agent
@@ -195,7 +215,11 @@ export function ChannelParticipantsPanel({ chatId }: { chatId: string }) {
       ) : null}
 
       <AgentEditor
-        onOpenChange={setEditorOpen}
+        agent={editingAgent}
+        onOpenChange={(open) => {
+          setEditorOpen(open)
+          if (!open) setEditingAgent(undefined)
+        }}
         onSaved={(agent) => void handleAgentSaved(agent)}
         open={editorOpen}
       />

@@ -20,6 +20,8 @@
 - [ ] free models from open router
 - [ ] paste images / upload files to chat
 - [ ] out of credits state
+- [ ] prompt caching
+- [ ] mobile view
 
 # planned
 
@@ -47,6 +49,8 @@ Deferred from the multi-agent foundation (see
 - [ ] agent card (model, context )
 - [ ] agent memories and agent tools (R5 future-proofing already in the type)
 - [ ] pluggable orchestration strategies / swappable scheduler
+- [x] per-agent chattiness dial (1–5) shaping channel decide-to-respond
+      framing; per-channel and per-participant overrides still deferred
 - [ ] additional participation modes beyond `auto-decide` / `mention-only`
       (regex, keyword, conditional)
 - [ ] per-agent (rather than per-turn) cost metering
@@ -58,6 +62,17 @@ Deferred from the multi-agent foundation (see
       (architecture P0c.3)
 - [ ] decide-status hint UI ("agent X is deciding")
 - [ ] decide-to-respond pre-call cost optimization (settings knob)
-- [ ] thread-write path for `respondIn: 'thread'` agent responses (R13a;
-      orchestrator currently parses but persists on the main timeline)
+- [ ] thread-write path for `respondIn: 'thread'` agent responses (R13a).
+      `decide-to-respond.parseAgentResponse` already extracts `respondIn`, but
+      `orchestrator.runOneAttempt` ignores it and writes the reply on the
+      turn's starting scope. Need: when `!isInsideThread &&
+      channelSettings.allowAgentThreading && decision.respondIn === 'thread'`,
+      call `getOrCreateThreadForMessage(triggeringEvent.id)` and persist the
+      assistant message into that branch (single branch per fan-out step;
+      reuse if multiple agents in the same step both pick thread).
+      Sync the root reply count so the branch indicator shows on the parent
+      message. User-visible symptom today: agents asked to "reply in a
+      branch" emit content that lands silently on main; the branch panel
+      stays empty. Likely also wants a stronger envelope nudge in
+      `buildDecideSystemPrompt` — current one-liner is too easy to ignore.
 - [ ] token-budget cap aggregation across `providerRequestAttempts.usage`

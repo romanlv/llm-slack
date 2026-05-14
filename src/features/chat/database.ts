@@ -208,121 +208,13 @@ export class LlmSlackDatabase extends Dexie {
         }
       })
 
-    // v6: introduce the multi-agent foundation. Adds the agents store and
-    // the chat-kind discriminator on parentChats. Legacy parentChats rows
-    // are backfilled to kind='dm' (today's model-DM behavior). agentId
-    // remains absent on every backfilled row; new agent-DMs created in U3
-    // populate it. R1 invariant — kind='channel' implies agentId null — is
-    // not yet enforceable since no channels can exist before U5.
+    // v6: multi-agent foundation. Lands the full agents/channels/turns
+    // surface in a single step — the v6..v11 chain that built it up
+    // incrementally never shipped on main, so collapsing it loses no real
+    // data path. Legacy v5 parentChats get kind='dm' backfilled; the new
+    // tables (agents, chatParticipants, channelSettings, turns,
+    // providerRequestAttempts) start empty.
     this.version(6)
-      .stores({
-        parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
-        threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
-        messages:
-          'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
-        pinnedMessages:
-          'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
-        savedMessages:
-          'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
-        providers: 'id, kind, createdAt',
-        modelOverrides: 'id, providerId, &[providerId+providerModelId]',
-        agents: 'id, createdAt, updatedAt',
-        settings: 'id',
-      })
-      .upgrade(async (tx) => {
-        await tx
-          .table('parentChats')
-          .toCollection()
-          .modify((row: Record<string, unknown>) => {
-            if (row.kind === undefined) {
-              row.kind = 'dm'
-            }
-          })
-      })
-
-    // v7: channel-shaped persistence. Empty tables only; no backfill needed
-    // because no channel rows can exist yet. messages.agentId is already
-    // declared at the type level (v6 schema) and stays unindexed in v0 — we
-    // only query by conversationId, not by agentId.
-    this.version(7)
-      .stores({
-        parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
-        threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
-        messages:
-          'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
-        pinnedMessages:
-          'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
-        savedMessages:
-          'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
-        providers: 'id, kind, createdAt',
-        modelOverrides: 'id, providerId, &[providerId+providerModelId]',
-        agents: 'id, createdAt, updatedAt',
-        chatParticipants:
-          'id, chatId, agentId, [chatId+sortKey], &[chatId+agentId]',
-        channelSettings: 'id',
-        settings: 'id',
-      })
-
-    // v8: turn lifecycle. Adds turns + providerRequestAttempts so every
-    // send has a place to record stop reason, per-agent ownership, and
-    // (later) cancellation provenance. Empty tables — existing in-flight
-    // 'streaming' rows are not migrated; recovery for them is tracked
-    // separately (P0c.3).
-    //
-    // chatParticipants.chatId is allowed to point at either parentChats.id
-    // (a channel) or threads.id (a thread under a channel — U11). The
-    // store shape doesn't change for the thread case; assertChannelChat
-    // and the DB invariants checker branch on the kind at write/read time.
-    this.version(8)
-      .stores({
-        parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
-        threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
-        messages:
-          'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
-        pinnedMessages:
-          'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
-        savedMessages:
-          'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
-        providers: 'id, kind, createdAt',
-        modelOverrides: 'id, providerId, &[providerId+providerModelId]',
-        agents: 'id, createdAt, updatedAt',
-        chatParticipants:
-          'id, chatId, agentId, [chatId+sortKey], &[chatId+agentId]',
-        channelSettings: 'id',
-        turns: 'id, parentChatId, conversationId, status, [conversationId+createdAt]',
-        providerRequestAttempts:
-          'id, turnId, assistantMessageId, agentId, [turnId+attemptNumber]',
-        settings: 'id',
-      })
-
-    // v9: addressable agent handles. Adds the unique `username` index on
-    // agents. No backfill — this branch is pre-release; any local v8 DB
-    // can be wiped before reopening.
-    this.version(9).stores({
-      parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
-      threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
-      messages:
-        'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
-      pinnedMessages:
-        'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
-      savedMessages: 'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
-      providers: 'id, kind, createdAt',
-      modelOverrides: 'id, providerId, &[providerId+providerModelId]',
-      agents: 'id, createdAt, updatedAt, &username',
-      chatParticipants: 'id, chatId, agentId, [chatId+sortKey], &[chatId+agentId]',
-      channelSettings: 'id',
-      turns: 'id, parentChatId, conversationId, status, [conversationId+createdAt]',
-      providerRequestAttempts:
-        'id, turnId, assistantMessageId, agentId, [turnId+attemptNumber]',
-      settings: 'id',
-    })
-
-    // v10: per-agent `chattiness` (1–5). Backfills existing agents at 2
-    // ('reserved') so legacy rooms get noticeably quieter on first run —
-    // matches the new default that pushes back against the "always reply"
-    // bias channels exhibited before the dial existed. No index added;
-    // chattiness is read from the agent row by id, never queried.
-    this.version(10)
       .stores({
         parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
         threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
@@ -343,11 +235,11 @@ export class LlmSlackDatabase extends Dexie {
       })
       .upgrade(async (tx) => {
         await tx
-          .table('agents')
+          .table('parentChats')
           .toCollection()
           .modify((row: Record<string, unknown>) => {
-            if (typeof row.chattiness !== 'number') {
-              row.chattiness = 2
+            if (row.kind === undefined) {
+              row.kind = 'dm'
             }
           })
       })

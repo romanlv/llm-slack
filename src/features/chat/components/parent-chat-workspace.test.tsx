@@ -763,10 +763,12 @@ describe('ParentChatWorkspace', () => {
     await db.parentChats.put(parentChat({ id: 'parent-2', title: 'launch', kind: 'channel', model: null }))
     await db.channelSettings.put({
       id: 'parent-2',
+      description: '',
+      systemPrompt: '',
       maxChainedSubTurns: 3,
+      chainFollowupMode: 'auto-decide',
       maxMessagesPerAgentPerInput: 2,
       tokenBudgetPerInput: 200_000,
-      defaultParticipationMode: 'auto-decide',
       allowAgentThreading: true,
       createdAt: 1,
       updatedAt: 1,
