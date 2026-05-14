@@ -123,7 +123,10 @@ describe('NewChatModal', () => {
     const chats = await db.parentChats.toArray()
     const agentDm = chats.find((c) => c.agentId === agent.id)
     expect(agentDm?.kind).toBe('dm')
-    expect(agentDm?.title).toBe('PM Lens')
+    // Title is the default placeholder; it gets replaced on first send via
+    // updateParentChatActivity so the sidebar row reflects the topic, not
+    // the agent name (which is already shown on the agent group header).
+    expect(agentDm?.title).toBe('Untitled chat')
   })
 
   it('renders an empty state and a link to the agents library on the Agent tab when no agents exist', async () => {
@@ -273,7 +276,7 @@ describe('NewChatModal', () => {
     expect(chats.length).toBe(1)
   })
 
-  it('reopens the same agent-DM when the agent is picked twice', async () => {
+  it('creates a fresh agent-DM each time the agent is picked so multiple chats can coexist', async () => {
     const agent = await seedAgent('Critic')
     const { router } = renderWithHarness()
 
@@ -296,11 +299,11 @@ describe('NewChatModal', () => {
 
     await waitFor(() => {
       const path = router.state.location.pathname
-      expect(path.split('/').at(-1)).toBe(firstChatId)
+      expect(path.split('/').at(-1)).not.toBe(firstChatId)
     })
     const chats = await db.parentChats.toArray()
     const forAgent = chats.filter((c) => c.agentId === agent.id)
-    expect(forAgent.length).toBe(1)
+    expect(forAgent.length).toBe(2)
   })
 
   it('closes the dialog when Escape is pressed', async () => {
@@ -324,6 +327,48 @@ describe('NewChatModal', () => {
     expect(screen.getByRole('tab', { name: /model/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /agent/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /channel/i })).toBeInTheDocument()
+  })
+
+  it('respects the model picked in the Model tab when starting a model-DM', async () => {
+    // Seed a provider so the modal's picker has at least one model on offer.
+    await createProvider({ kind: 'openai', apiKey: 'sk-proj-test' })
+
+    const { router } = renderWithHarness()
+
+    await userEvent.click(await screen.findByRole('button', { name: /open new chat/i }))
+
+    // The Model tab is selected by default. Its picker is the only <select>
+    // visible at this point, so grab it directly.
+    const modelSelect = await waitFor(() => {
+      const select = screen
+        .getAllByRole('combobox')
+        .find((el) => el.tagName === 'SELECT') as HTMLSelectElement | undefined
+      if (!select || select.options.length === 0) {
+        throw new Error('Model select not populated yet')
+      }
+      return select
+    })
+
+    // Pick the last option so we know we changed it from the default. If
+    // there's only one model, the assertion below still verifies the chosen
+    // value actually landed on the chat.
+    const target = modelSelect.options[modelSelect.options.length - 1]!
+    await userEvent.selectOptions(modelSelect, target.value)
+
+    await userEvent.click(screen.getByRole('button', { name: /^start$/i }))
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toMatch(/^\/chat\//)
+    })
+
+    const chats = await db.parentChats.toArray()
+    expect(chats.length).toBe(1)
+    expect(chats[0]!.model?.providerModelId).toBeTruthy()
+    // The picker encodes provider+model — the persisted ref must agree on
+    // both halves with the option we selected.
+    const [providerId, providerModelId] = target.value.split('\x1f')
+    expect(chats[0]!.model?.providerId).toBe(providerId)
+    expect(chats[0]!.model?.providerModelId).toBe(providerModelId)
   })
 
   it('handles a no-providers, no-agents environment gracefully (Model tab still creates an empty chat)', async () => {

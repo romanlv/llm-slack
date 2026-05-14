@@ -224,15 +224,20 @@ describe('ChatShell chat actions', () => {
     expect(
       await screen.findByRole('link', { name: /launch-plan/i }),
     ).toBeInTheDocument()
-    // DM chats appear separately under Recent (still present).
+    // Model-DM appears under Recent.
     expect(
       await screen.findByRole('link', { name: /model-dm/i }),
     ).toBeInTheDocument()
+    // Agent-DM rows live under their own Agents group, not Recent. The
+    // section header is "Agents" and there is at least one link with the
+    // chat's title pointing at the chat URL.
+    expect(await screen.findByText(/^agents$/i)).toBeInTheDocument()
+    const pmLensLinks = await screen.findAllByRole('link', { name: /pm lens/i })
     expect(
-      await screen.findByRole('link', { name: /pm lens/i }),
-    ).toBeInTheDocument()
-    // No channel bleeds into the Recent count — find the "No other chats"
-    // line should NOT be present, but "model-dm" and "PM Lens" are.
+      pmLensLinks.some((link) => link.getAttribute('href') === '/chat/agent-1'),
+    ).toBe(true)
+    // No channel bleeds into the Recent count — "No other chats" line is
+    // not present.
     expect(screen.queryByText(/no other chats/i)).toBeNull()
   })
 

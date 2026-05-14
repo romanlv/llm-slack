@@ -91,20 +91,12 @@ export async function createParentChat(
   return chat
 }
 
-// Per-agent equivalent of findOrCreateEmptyParentChat. Returns the most
-// recent non-archived agent-DM for `agentId` if one exists, otherwise
-// creates a fresh one snapshotting the agent's current model.
-export async function findOrCreateAgentDm(agentId: string) {
-  const existing = await db.parentChats
-    .where('agentId')
-    .equals(agentId)
-    .filter((chat) => chat.kind === 'dm' && !chat.archivedAt)
-    .sortBy('updatedAt')
-
-  if (existing.length > 0) {
-    return existing[existing.length - 1]
-  }
-
+// Always creates a fresh agent-DM. Title is left as the default
+// "Untitled chat" so `updateParentChatActivity` can derive a title from
+// the first user prompt — the sidebar groups these rows under the agent
+// already, so the per-chat label should reflect the conversation topic,
+// not the agent name.
+export async function createAgentDm(agentId: string) {
   const agent = await db.agents.get(agentId)
   if (!agent) {
     throw new Error(`Cannot create agent-DM: agent "${agentId}" does not exist.`)
@@ -113,16 +105,22 @@ export async function findOrCreateAgentDm(agentId: string) {
   return createParentChat({
     kind: 'dm',
     agentId,
-    title: agent.displayName,
     model: agent.model,
   })
 }
 
-export async function findOrCreateEmptyParentChat() {
+// Reuses an existing empty Model-DM (kind='dm', no agent binding) when one
+// exists, otherwise creates a fresh one. Agent-DMs and channels are skipped
+// — reusing those would silently bind the new "Model DM" to an agent, which
+// would override the picker with the agent's model.
+//
+// If `model` is provided, it is applied to the reused/created chat so that
+// the user's pre-flight selection in the New Chat modal sticks.
+export async function findOrCreateEmptyParentChat(model?: ModelRef | null) {
   const chats = await db.parentChats.orderBy('updatedAt').reverse().toArray()
 
   for (const chat of chats) {
-    if (chat.archivedAt) {
+    if (chat.archivedAt || chat.kind !== 'dm' || chat.agentId) {
       continue
     }
 
@@ -133,11 +131,16 @@ export async function findOrCreateEmptyParentChat() {
       .count()
 
     if (count === 0) {
+      if (model !== undefined) {
+        const now = Date.now()
+        await db.parentChats.update(chat.id, { model, updatedAt: now })
+        return { ...chat, model, updatedAt: now }
+      }
       return chat
     }
   }
 
-  return createParentChat()
+  return createParentChat(model !== undefined ? { model } : undefined)
 }
 
 async function seedParentChatIfNeeded() {

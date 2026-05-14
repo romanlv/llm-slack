@@ -6,11 +6,13 @@ import {
   Archive,
   ArchiveRestore,
   Bookmark,
+  Bot,
   ExternalLink,
   Hash,
   KeyRound,
   MessageSquarePlus,
   MoreHorizontal,
+  Plus,
   Search,
   Settings2,
   Star,
@@ -22,9 +24,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Menu, MenuItem } from '@/components/ui/menu'
 import { AgentDot } from '@/features/agents/agent-dot'
+import { listAgents } from '@/features/agents/agents-repository'
+import type { Agent } from '@/features/chat/domain'
 import {
   archiveParentChat,
   countStartedBranchesByParentChat,
+  createAgentDm,
   db,
   deleteParentChat,
   restoreParentChat,
@@ -190,6 +195,7 @@ export function ChatShell() {
     [],
     [],
   )
+  const agents = useLiveQuery(() => listAgents(), [], [] as Agent[])
   const threadCountByParentChat = useLiveQuery(
     () => countStartedBranchesByParentChat(),
     [],
@@ -198,6 +204,11 @@ export function ChatShell() {
 
   const handleNewParentChat = () => {
     setNewChatOpen(true)
+  }
+
+  const handleNewAgentDm = async (agentId: string) => {
+    const chat = await createAgentDm(agentId)
+    await navigate({ to: '/chat/$chatId', params: { chatId: chat.id } })
   }
 
   const handleDeleteParentChat = async (parentChat: ParentChat) => {
@@ -220,24 +231,46 @@ export function ChatShell() {
   )
   const activeParentChats = visibleParentChats.filter((chat) => !chat.archivedAt)
   const archivedParentChats = visibleParentChats.filter((chat) => Boolean(chat.archivedAt))
-  // DM-equivalent listings (Starred, Recent) filter to kind='dm' so
-  // channels stay in their own section. Star remains a per-chat affordance
-  // regardless of kind, so starred channels surface under Channels as
-  // pinned rows rather than in the DM Starred group.
-  const dmParentChats = activeParentChats.filter((chat) => chat.kind === 'dm')
+  // DM rows split by binding: model-DMs flow into Starred/Recent as
+  // before; agent-DMs collapse under the Agents section, grouped by
+  // agentId so all chats with the same agent share one header.
+  const modelDmChats = activeParentChats.filter(
+    (chat) => chat.kind === 'dm' && !chat.agentId,
+  )
+  const agentDmChats = activeParentChats.filter(
+    (chat) => chat.kind === 'dm' && Boolean(chat.agentId),
+  )
   const channelParentChats = activeParentChats.filter(
     (chat) => chat.kind === 'channel',
   )
-  const starredParentChats = dmParentChats
+  const starredParentChats = modelDmChats
     .filter((chat) => Boolean(chat.starredAt))
     .sort((a, b) => (b.starredAt ?? 0) - (a.starredAt ?? 0))
-  const recentParentChats = dmParentChats.filter((chat) => !chat.starredAt)
+  const recentParentChats = modelDmChats.filter((chat) => !chat.starredAt)
   const RECENT_LIMIT = 8
   const visibleRecentParentChats = recentParentChats.slice(0, RECENT_LIMIT)
   const hasMoreRecent = recentParentChats.length > RECENT_LIMIT
   const visibleChannelParentChats = [...channelParentChats].sort(
     (a, b) => b.updatedAt - a.updatedAt,
   )
+
+  const agentDmsByAgentId = new Map<string, ParentChat[]>()
+  for (const chat of agentDmChats) {
+    const list = agentDmsByAgentId.get(chat.agentId!) ?? []
+    list.push(chat)
+    agentDmsByAgentId.set(chat.agentId!, list)
+  }
+  const agentsById = new Map<string, Agent>(agents.map((agent) => [agent.id, agent]))
+  // Order agents by their most-recent chat's updatedAt so the list mirrors
+  // recency without needing per-agent updatedAt bookkeeping.
+  const agentGroups = Array.from(agentDmsByAgentId.entries())
+    .map(([agentId, chats]) => ({
+      agentId,
+      agent: agentsById.get(agentId),
+      chats: chats.sort((a, b) => b.updatedAt - a.updatedAt),
+      latestUpdatedAt: chats.reduce((max, chat) => Math.max(max, chat.updatedAt), 0),
+    }))
+    .sort((a, b) => b.latestUpdatedAt - a.latestUpdatedAt)
   const userName = settings?.userName ?? DEFAULT_USER_NAME
   const avatarDataUrl = settings?.avatarDataUrl
   const hasProviderKey = providers.some((provider) => provider.apiKey?.trim())
@@ -399,6 +432,101 @@ export function ChatShell() {
                       parentChatId={parentChat.id}
                     />
                   </Fragment>
+                )
+              })}
+            </section>
+          ) : null}
+
+          {agentGroups.length > 0 ? (
+            <section className="mt-5">
+              <div className="mb-1 flex items-center justify-between px-4 font-mono text-meta font-bold uppercase tracking-[0.08em] text-sidebar-fg-muted">
+                <span className="inline-flex items-center gap-1.5">
+                  <Bot aria-hidden="true" className="size-3 shrink-0" />
+                  DMs with Agents
+                </span>
+                <span className="font-mono text-meta text-sidebar-fg-dim">
+                  {agentGroups.length}
+                </span>
+              </div>
+              {agentGroups.map((group) => {
+                // Falls back to the per-chat title when the agent definition
+                // has been deleted — the agentSnapshot on messages keeps
+                // authorship rendering correct, but the sidebar header has
+                // no message context to lean on.
+                const headerName =
+                  group.agent?.displayName ??
+                  group.chats[0]?.title ??
+                  'Unknown agent'
+                return (
+                  <div key={group.agentId}>
+                    <div className="group mx-2 mt-1 flex items-center gap-2 rounded-md px-2 py-1 text-sidebar-fg-muted">
+                      <Link
+                        className="flex min-w-0 flex-1 items-center gap-2 transition hover:text-white"
+                        title={`Open ${headerName} in agent settings`}
+                        to="/settings/agents"
+                      >
+                        <AgentDot
+                          agentId={group.agentId}
+                          displayName={headerName}
+                          size="sm"
+                        />
+                        <span className="min-w-0 flex-1 truncate font-mono text-meta font-bold uppercase tracking-[0.08em]">
+                          {headerName}
+                        </span>
+                      </Link>
+                      <button
+                        aria-label={`New chat with ${headerName}`}
+                        className="rounded p-0.5 text-sidebar-fg-muted opacity-0 transition hover:bg-white/15 hover:text-white focus-visible:opacity-100 group-hover:opacity-100"
+                        onClick={() => void handleNewAgentDm(group.agentId)}
+                        title={`New chat with ${headerName}`}
+                        type="button"
+                      >
+                        <Plus className="size-3.5" />
+                      </button>
+                    </div>
+                    {group.chats.map((parentChat) => {
+                      const active = parentChat.id === activeChatId
+                      const branchCount = threadCountByParentChat.get(parentChat.id) ?? 0
+                      const chatLabel =
+                        parentChat.title === 'Untitled chat'
+                          ? 'New chat'
+                          : parentChat.title
+                      return (
+                        <Fragment key={parentChat.id}>
+                          <div
+                            className={cn(
+                              'group mx-2 ml-5 flex items-center gap-2 rounded-md px-2 py-1 text-body transition',
+                              active
+                                ? 'bg-sidebar-active font-semibold text-sidebar-active-fg'
+                                : 'text-sidebar-fg hover:bg-sidebar-hover hover:text-white',
+                            )}
+                          >
+                            <Link
+                              className="flex min-w-0 flex-1 items-center gap-1.5 truncate"
+                              params={{ chatId: parentChat.id }}
+                              to="/chat/$chatId"
+                            >
+                              <span className="min-w-0 flex-1 truncate">{chatLabel}</span>
+                              {branchCount > 0 ? (
+                                <span className="rounded bg-white/10 px-1.5 font-mono text-meta font-semibold text-sidebar-chip">
+                                  ↳{branchCount}
+                                </span>
+                              ) : null}
+                            </Link>
+                            <ChatActionsMenu
+                              onDelete={() => void handleDeleteParentChat(parentChat)}
+                              parentChat={parentChat}
+                            />
+                          </div>
+                          <ChatBranchesSlot
+                            active={active}
+                            activeThreadId={activeThreadId}
+                            parentChatId={parentChat.id}
+                          />
+                        </Fragment>
+                      )
+                    })}
+                  </div>
                 )
               })}
             </section>

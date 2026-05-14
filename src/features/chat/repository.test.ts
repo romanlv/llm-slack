@@ -278,32 +278,73 @@ describe('thread repository semantics', () => {
     await expect(db.parentChats.count()).resolves.toBe(2)
   })
 
-  it('findOrCreateAgentDm reuses the most recent non-archived agent-DM and creates one otherwise', async () => {
+  it('skips empty agent-DMs and channels when looking for a model-DM to reuse', async () => {
+    // An empty agent-DM and an empty channel must not be hijacked as
+    // model-DMs — the workspace would otherwise render the agent header
+    // (with no model picker) for what the user asked to be a model-DM.
+    await db.parentChats.bulkAdd([
+      parentChat({ id: 'agent-dm', agentId: 'a1', updatedAt: 30 }),
+      parentChat({ id: 'channel-empty', kind: 'channel', updatedAt: 40 }),
+    ])
+
+    const created = await findOrCreateEmptyParentChat()
+
+    expect(created.id).not.toBe('agent-dm')
+    expect(created.id).not.toBe('channel-empty')
+    expect(created.kind).toBe('dm')
+    expect(created.agentId).toBeFalsy()
+  })
+
+  it('applies the supplied model to a reused empty model-DM and to a newly created one', async () => {
+    const overrideModel = {
+      providerId: 'p-2',
+      providerKind: 'openrouter' as const,
+      providerModelId: 'override-id',
+    }
+
+    await db.parentChats.add(
+      parentChat({ id: 'empty', updatedAt: 10, model: MODEL_PARENT }),
+    )
+
+    const reused = await findOrCreateEmptyParentChat(overrideModel)
+    expect(reused.id).toBe('empty')
+    expect(reused.model).toEqual(overrideModel)
+    const persisted = await db.parentChats.get('empty')
+    expect(persisted?.model).toEqual(overrideModel)
+
+    // Now fill the existing chat and confirm a fresh one is created with
+    // the supplied model — the user's pre-flight pick has to stick.
+    await db.messages.add(
+      message({ id: 'm1', conversationId: 'empty', parentChatId: 'empty' }),
+    )
+    const created = await findOrCreateEmptyParentChat(overrideModel)
+    expect(created.id).not.toBe('empty')
+    expect(created.model).toEqual(overrideModel)
+  })
+
+  it('createAgentDm always creates a fresh agent-DM with a placeholder title', async () => {
     const { createAgent } = await import('@/features/agents/agents-repository')
-    const { findOrCreateAgentDm } = await import('@/features/chat/repository')
+    const { createAgentDm } = await import('@/features/chat/repository')
     const agent = await createAgent({
       displayName: 'Critic',
       model: { providerKind: 'openrouter', providerModelId: 'm' },
     })
 
-    const first = await findOrCreateAgentDm(agent.id)
+    const first = await createAgentDm(agent.id)
     expect(first.kind).toBe('dm')
     expect(first.agentId).toBe(agent.id)
-    expect(first.title).toBe('Critic')
+    // Title stays as the default placeholder so the first prompt can
+    // derive a per-chat label via updateParentChatActivity.
+    expect(first.title).toBe('Untitled chat')
 
-    const second = await findOrCreateAgentDm(agent.id)
-    expect(second.id).toBe(first.id)
-
-    // Archive the existing one — a new agent-DM should be created.
-    await db.parentChats.update(first.id, { archivedAt: Date.now() })
-    const third = await findOrCreateAgentDm(agent.id)
-    expect(third.id).not.toBe(first.id)
-    expect(third.agentId).toBe(agent.id)
+    const second = await createAgentDm(agent.id)
+    expect(second.id).not.toBe(first.id)
+    expect(second.agentId).toBe(agent.id)
   })
 
-  it('findOrCreateAgentDm refuses to create a chat for a missing agent', async () => {
-    const { findOrCreateAgentDm } = await import('@/features/chat/repository')
-    await expect(findOrCreateAgentDm('ghost')).rejects.toThrow(/does not exist/)
+  it('createAgentDm refuses to create a chat for a missing agent', async () => {
+    const { createAgentDm } = await import('@/features/chat/repository')
+    await expect(createAgentDm('ghost')).rejects.toThrow(/does not exist/)
   })
 
   it('channel participants + settings round-trip with strictly-monotonic sortKey', async () => {

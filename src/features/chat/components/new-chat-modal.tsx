@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { Bot, Check, Hash, MessageSquarePlus } from 'lucide-react'
@@ -10,12 +10,18 @@ import { AgentDot } from '@/features/agents/agent-dot'
 import { listAgents } from '@/features/agents/agents-repository'
 import type { Agent, ParentChat, ParticipationMode } from '@/features/chat/domain'
 import {
+  createAgentDm,
   createChannel,
-  findOrCreateAgentDm,
   findOrCreateEmptyParentChat,
 } from '@/features/chat/repository'
+import type { ModelRef } from '@/features/providers/model-ref'
+import { listEnabledModels, type EffectiveModel } from '@/features/providers/models-catalog'
+import { listProviders } from '@/features/providers/providers-repository'
+import { getSettings } from '@/features/settings/settings-repository'
 import { cn } from '@/lib/utils'
 
+import { buildPickerValue, refFromPickerString } from './model-picker-helpers'
+import { MiniModelSelect } from './model-picker'
 import { ParticipationModeSelect } from './participation-mode-select'
 
 type NewChatModalProps = {
@@ -74,11 +80,11 @@ function NewChatModalBody({ onClose }: { onClose: () => void }) {
     onClose()
   }
 
-  const startModelDm = async () => {
+  const startModelDm = async (model: ModelRef | null) => {
     if (busy) return
     setBusy(true)
     try {
-      const chat = await findOrCreateEmptyParentChat()
+      const chat = await findOrCreateEmptyParentChat(model)
       await goToChat(chat)
     } finally {
       setBusy(false)
@@ -89,7 +95,7 @@ function NewChatModalBody({ onClose }: { onClose: () => void }) {
     if (busy) return
     setBusy(true)
     try {
-      const chat = await findOrCreateAgentDm(agent.id)
+      const chat = await createAgentDm(agent.id)
       await goToChat(chat)
     } finally {
       setBusy(false)
@@ -171,19 +177,81 @@ function NewChatModalBody({ onClose }: { onClose: () => void }) {
   )
 }
 
-function ModelTab({ busy, onStart }: { busy: boolean; onStart: () => void }) {
+function ModelTab({
+  busy,
+  onStart,
+}: {
+  busy: boolean
+  onStart: (model: ModelRef | null) => void
+}) {
+  const availableModels = useLiveQuery(
+    () => listEnabledModels(),
+    [],
+    [] as EffectiveModel[],
+  )
+  const providers = useLiveQuery(() => listProviders(), [], [])
+  const settings = useLiveQuery(() => getSettings(), [], undefined)
+
+  // The fallback resolves to the saved default if it is still enabled,
+  // otherwise the first available model. Mirrors the chat-workspace picker
+  // so the modal and composer agree on "what would be used right now".
+  const fallbackPickerValue = useMemo(() => {
+    const defaultRef = settings?.defaultModel
+    if (defaultRef) {
+      const match = availableModels.find(
+        (model) =>
+          model.providerModelId === defaultRef.providerModelId &&
+          (!defaultRef.providerId || model.providerId === defaultRef.providerId),
+      )
+      if (match) return buildPickerValue(match.providerId, match.providerModelId)
+    }
+    const first = availableModels[0]
+    return first ? buildPickerValue(first.providerId, first.providerModelId) : ''
+  }, [availableModels, settings?.defaultModel])
+
+  const [pickerValue, setPickerValue] = useState<string | null>(null)
+  const effectiveValue = pickerValue ?? fallbackPickerValue
+
+  const start = () => {
+    onStart(
+      refFromPickerString(effectiveValue, {
+        availableModels,
+        settingsDefault: settings?.defaultModel,
+      }),
+    )
+  }
+
   return (
     <div className="grid gap-4">
       <div>
         <h3 className="text-heading font-semibold text-ink">Model DM</h3>
         <p className="mt-1 text-small text-ink-muted">
           Start a 1:1 chat with one of your configured models. Pick the model
-          in the composer once you're in the chat — your default is used
-          unless you change it.
+          here — you can change it later from the chat header.
         </p>
       </div>
+      <div className="grid gap-1.5">
+        <span className="font-mono text-meta font-semibold uppercase tracking-wider text-ink-muted">
+          Model
+        </span>
+        <div>
+          <MiniModelSelect
+            availableModels={availableModels}
+            connections={providers}
+            fallbackLabel={(id) => id}
+            onChange={setPickerValue}
+            value={effectiveValue}
+          />
+        </div>
+        {availableModels.length === 0 ? (
+          <p className="text-small text-ink-muted">
+            No models available yet — connect a provider in settings, or
+            start the chat and pick a model from the composer.
+          </p>
+        ) : null}
+      </div>
       <div>
-        <Button disabled={busy} onClick={onStart}>
+        <Button disabled={busy} onClick={start}>
           <MessageSquarePlus className="size-4" />
           Start
         </Button>
