@@ -291,6 +291,7 @@ async function runOneAttempt(input: RunOneAttemptInput): Promise<RunOneAttemptRe
       channelTitle,
       participants: input.participantsForRoster,
       agentSystemPrompt: candidate.agent.systemPrompt,
+      chattiness: candidate.agent.chattiness,
       allowAgentThreading: channelSettings.allowAgentThreading,
       isInsideThread: input.isInsideThread,
     })

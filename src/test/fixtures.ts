@@ -124,6 +124,7 @@ export interface SeedAgentOptions {
   username?: string
   model?: ModelRef
   systemPrompt?: string
+  chattiness?: import('@/features/chat/domain').ChattinessLevel
   createdAt?: number
 }
 
@@ -136,6 +137,7 @@ export async function seedAgent(options: SeedAgentOptions = {}): Promise<import(
     username: options.username ?? id.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
     model: options.model ?? makeModelRef(),
     systemPrompt: options.systemPrompt ?? '',
+    chattiness: options.chattiness ?? 2,
     createdAt: now,
     updatedAt: now,
   }

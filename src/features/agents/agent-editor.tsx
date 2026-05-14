@@ -11,7 +11,8 @@ import {
   pickerValueFromRef,
   refFromPickerString,
 } from '@/features/chat/components/model-picker-helpers'
-import type { Agent } from '@/features/chat/domain'
+import { agentDefaults, chattinessLevels } from '@/features/chat/defaults'
+import type { Agent, ChattinessLevel } from '@/features/chat/domain'
 import type { ModelRef } from '@/features/providers/model-ref'
 import {
   listEnabledModels,
@@ -84,6 +85,9 @@ function AgentEditorBody({
   // existing value to send.
   const [usernameTouched, setUsernameTouched] = useState(Boolean(agent))
   const [systemPrompt, setSystemPrompt] = useState(agent?.systemPrompt ?? '')
+  const [chattiness, setChattiness] = useState<ChattinessLevel>(
+    agent?.chattiness ?? agentDefaults.chattiness,
+  )
   // User-selected picker value, or `undefined` until the user touches the
   // dropdown. At submit time we derive the active value from this override
   // (when set) or from the default. Keeping the override separate avoids a
@@ -112,6 +116,7 @@ function AgentEditorBody({
   const usernameId = useId()
   const systemPromptId = useId()
   const modelId = useId()
+  const chattinessId = useId()
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -142,12 +147,14 @@ function AgentEditorBody({
             username,
             model: ref,
             systemPrompt,
+            chattiness,
           })
         : await createAgent({
             displayName,
             username: usernameForCreate,
             model: ref,
             systemPrompt,
+            chattiness,
           })
       onSaved?.(saved)
       onClose()
@@ -281,6 +288,37 @@ function AgentEditorBody({
             Plain free-text. The agent uses this as its system message on
             every call. In channels, it also shapes the agent's decide-to-respond
             behavior.
+          </p>
+        </div>
+
+        <div className="grid gap-1.5">
+          <label
+            className="font-mono text-meta font-semibold uppercase tracking-wider text-ink-muted"
+            htmlFor={chattinessId}
+          >
+            Chattiness
+          </label>
+          <div className="flex items-center gap-3">
+            <input
+              className="flex-1 accent-accent"
+              id={chattinessId}
+              max={5}
+              min={1}
+              onChange={(event) =>
+                setChattiness(Number(event.target.value) as ChattinessLevel)
+              }
+              step={1}
+              type="range"
+              value={chattiness}
+            />
+            <span className="w-24 font-mono text-meta uppercase tracking-wider text-ink">
+              {chattinessLevels[chattiness].codename}
+            </span>
+          </div>
+          <p className="text-small text-ink-muted">
+            How readily this agent volunteers in channels when not directly
+            addressed. Lower keeps the room quieter; higher pushes the agent
+            to engage. Ignored in DMs and when mention-only.
           </p>
         </div>
 

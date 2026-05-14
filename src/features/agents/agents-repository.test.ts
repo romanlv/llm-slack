@@ -110,6 +110,26 @@ describe('agents repository', () => {
     expect(refreshed?.agentId).toBeNull()
   })
 
+  it('defaults chattiness to the agentDefaults value and accepts an explicit level', async () => {
+    const defaulted = await createAgent({
+      displayName: 'Default',
+      username: 'default',
+      model: MODEL,
+    })
+    expect(defaulted.chattiness).toBe(2)
+
+    const explicit = await createAgent({
+      displayName: 'Eager',
+      username: 'eager',
+      model: MODEL,
+      chattiness: 5,
+    })
+    expect(explicit.chattiness).toBe(5)
+
+    const updated = await updateAgent(explicit.id, { chattiness: 1 })
+    expect(updated.chattiness).toBe(1)
+  })
+
   it('assertAgentExists returns the row when present and throws when missing', async () => {
     const agent = await createAgent({ displayName: 'Reviewer', username: 'reviewer', model: MODEL })
     await expect(assertAgentExists(agent.id)).resolves.toMatchObject({ id: agent.id })

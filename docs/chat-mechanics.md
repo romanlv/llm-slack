@@ -38,7 +38,7 @@ checking the current implementation.
   code still reuses the most recent non-archived agent DM.
 - [ ] Sidebar Agents section should list every defined agent, expose one-click
   new-chat creation, and expand to show that agent's chats.
-- [ ] Agent-DM empty responses should be dropped with no assistant message row.
+- [x] Agent-DM empty responses should be dropped with no assistant message row.
   Current code persists a fallback empty-response message.
 - [ ] The richer XML channel prompt (`<description>`, `<house_rules>`,
   public roster role/bio, `<your_role>`) needs schema fields and prompt
@@ -49,8 +49,11 @@ checking the current implementation.
 - [ ] Channel fan-out should use barriered trigger batches instead of choosing
   one "latest" reply as the next trigger. `chainFollowupMode` should tune
   whether follow-up steps are disabled, mention-only, or auto-decide.
-- [ ] Chattiness/default tuning should move into a single
-  `channel-defaults.ts` source of truth.
+- [x] Per-agent chattiness dial (1–5, default 2 "reserved") shapes the
+  decide-to-respond prefix. Per-channel and per-participant overrides
+  are still pending; chattiness lives on the agent only for now.
+- [ ] Channel-level and per-participant chattiness overrides on top of
+  the per-agent value.
 - [ ] Primary-responder channel threads need a persisted thread field and
   decide-to-respond bias.
 - [ ] Branch context scope needs to be snapshotted per thread

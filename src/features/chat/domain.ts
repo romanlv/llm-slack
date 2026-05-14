@@ -6,6 +6,13 @@ export type ConversationType = 'parent' | 'thread'
 
 export type ChatKind = 'dm' | 'channel'
 
+// Per-agent dial governing how readily the agent volunteers when not
+// directly addressed. 1=wallflower, 5=eager. Maps to a prompt fragment in
+// defaults.ts that's injected into the channel decide-to-respond prefix.
+// Ignored for agent-DMs (always asked) and for mention-only candidates
+// (never see the decide prefix).
+export type ChattinessLevel = 1 | 2 | 3 | 4 | 5
+
 export interface Agent {
   id: string
   displayName: string
@@ -19,6 +26,7 @@ export interface Agent {
   // makes sense for model-DMs (no agent).
   model: ModelRef
   systemPrompt: string
+  chattiness: ChattinessLevel
   createdAt: number
   updatedAt: number
 }

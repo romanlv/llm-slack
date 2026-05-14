@@ -316,6 +316,41 @@ export class LlmSlackDatabase extends Dexie {
         'id, turnId, assistantMessageId, agentId, [turnId+attemptNumber]',
       settings: 'id',
     })
+
+    // v10: per-agent `chattiness` (1–5). Backfills existing agents at 2
+    // ('reserved') so legacy rooms get noticeably quieter on first run —
+    // matches the new default that pushes back against the "always reply"
+    // bias channels exhibited before the dial existed. No index added;
+    // chattiness is read from the agent row by id, never queried.
+    this.version(10)
+      .stores({
+        parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
+        threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+        messages:
+          'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+        pinnedMessages:
+          'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+        savedMessages: 'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
+        providers: 'id, kind, createdAt',
+        modelOverrides: 'id, providerId, &[providerId+providerModelId]',
+        agents: 'id, createdAt, updatedAt, &username',
+        chatParticipants: 'id, chatId, agentId, [chatId+sortKey], &[chatId+agentId]',
+        channelSettings: 'id',
+        turns: 'id, parentChatId, conversationId, status, [conversationId+createdAt]',
+        providerRequestAttempts:
+          'id, turnId, assistantMessageId, agentId, [turnId+attemptNumber]',
+        settings: 'id',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('agents')
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            if (typeof row.chattiness !== 'number') {
+              row.chattiness = 2
+            }
+          })
+      })
   }
 }
 

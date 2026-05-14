@@ -111,6 +111,25 @@ const LEGACY_SCHEMA_CHAIN: Array<Record<string, string>> = [
       'id, turnId, assistantMessageId, agentId, [turnId+attemptNumber]',
     settings: 'id',
   },
+  // v9 — addressable agent handles (&username index)
+  {
+    parentChats: 'id, createdAt, updatedAt, archivedAt, starredAt, kind, agentId',
+    threads: 'id, rootMessageId, parentChatId, parentThreadId, updatedAt',
+    messages:
+      'id, conversationType, conversationId, parentChatId, createdAt, [conversationId+createdAt]',
+    pinnedMessages:
+      'id, parentChatId, conversationType, conversationId, messageId, pinnedAt, sortKey, [conversationId+sortKey], &[conversationId+messageId], [parentChatId+pinnedAt]',
+    savedMessages: 'id, createdAt, &messageId, parentChatId, [parentChatId+createdAt]',
+    providers: 'id, kind, createdAt',
+    modelOverrides: 'id, providerId, &[providerId+providerModelId]',
+    agents: 'id, createdAt, updatedAt, &username',
+    chatParticipants: 'id, chatId, agentId, [chatId+sortKey], &[chatId+agentId]',
+    channelSettings: 'id',
+    turns: 'id, parentChatId, conversationId, status, [conversationId+createdAt]',
+    providerRequestAttempts:
+      'id, turnId, assistantMessageId, agentId, [turnId+attemptNumber]',
+    settings: 'id',
+  },
 ]
 
 async function seedLegacyAt(
@@ -462,8 +481,43 @@ describe('schema migrations', () => {
     }
   })
 
+  it('v9 → v10: backfills agents.chattiness to the reserved default', async () => {
+    await seedLegacyAt(9, async (legacy) => {
+      await legacy.table('agents').put({
+        id: 'legacy-agent',
+        displayName: 'Critic',
+        username: 'critic',
+        model: { providerKind: 'openrouter', providerModelId: 'm' },
+        systemPrompt: '',
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await legacy.table('agents').put({
+        id: 'already-set',
+        displayName: 'Pre-set',
+        username: 'preset',
+        model: { providerKind: 'openrouter', providerModelId: 'm' },
+        systemPrompt: '',
+        chattiness: 5,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+    })
+
+    const upgraded = await openUpgraded()
+    try {
+      expect(upgraded.verno).toBeGreaterThanOrEqual(10)
+      const backfilled = await upgraded.agents.get('legacy-agent')
+      expect(backfilled?.chattiness).toBe(2)
+      const preset = await upgraded.agents.get('already-set')
+      expect(preset?.chattiness).toBe(5)
+    } finally {
+      upgraded.close()
+    }
+  })
+
   it('module singleton db opens cleanly on a fresh IDB', async () => {
     await db.open()
-    expect(db.verno).toBeGreaterThanOrEqual(9)
+    expect(db.verno).toBeGreaterThanOrEqual(10)
   })
 })

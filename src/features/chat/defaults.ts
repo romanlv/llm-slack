@@ -9,7 +9,7 @@
 //   • Constants — read every operation, never persisted. Editing takes
 //                 effect on the next call.
 
-import type { Agent, ChannelSettings } from './domain'
+import type { Agent, ChannelSettings, ChattinessLevel } from './domain'
 
 // ─── Seeds ───────────────────────────────────────────────────────────
 
@@ -51,12 +51,14 @@ export const channelDefaults: Omit<ChannelSettings, 'id' | 'createdAt' | 'update
  * (`displayName`, `username`, `model`) is user-supplied — this seed only
  * covers character fields the user may leave empty.
  *
- * Currently the agents-repository sets `systemPrompt` directly from the
- * editor; this constant exists so future seed sites have a single
- * reference and so adding new optional character fields lands here.
+ * `chattiness` defaults below mid: LLMs lean toward "yes I can help" once
+ * they emit any content token, so the silence-leaning level pushes back
+ * against the chatty default behavior. Users dial up explicitly when they
+ * want a more talkative agent.
  */
-export const agentDefaults: Pick<Agent, 'systemPrompt'> = {
+export const agentDefaults: Pick<Agent, 'systemPrompt' | 'chattiness'> = {
   systemPrompt: '',
+  chattiness: 2,
 }
 
 // ─── Live constants ──────────────────────────────────────────────────
@@ -67,3 +69,41 @@ export const agentDefaults: Pick<Agent, 'systemPrompt'> = {
  * real reply, not silence.
  */
 export const silenceSentinel = '<silent>'
+
+/**
+ * Per-level mapping consumed by both the editor UI (slider label) and the
+ * orchestrator (decide-to-respond prompt fragment). Iterating wording here
+ * is the primary lever for taming or unlocking channel chattiness without
+ * a schema change. Keep fragments self-contained second-person sentences;
+ * they're slotted into the decide prompt body verbatim.
+ */
+export const chattinessLevels: Record<
+  ChattinessLevel,
+  { codename: string; promptFragment: string }
+> = {
+  1: {
+    codename: 'wallflower',
+    promptFragment:
+      'Speak only when directly addressed by name. Default to silence on everything else, even when you could contribute.',
+  },
+  2: {
+    codename: 'reserved',
+    promptFragment:
+      'Speak only when you are the clear domain authority for what was said, or when there is a factual error you must correct. When in doubt, stay silent.',
+  },
+  3: {
+    codename: 'balanced',
+    promptFragment:
+      'Speak when you have something genuinely useful to add — a missing perspective, a needed clarification, a constructive challenge. Skip messages where you would only be agreeing, restating, or being polite.',
+  },
+  4: {
+    codename: 'engaged',
+    promptFragment:
+      'Engage actively. Offer perspective, ask follow-up questions, and surface missed considerations whenever they would move the conversation forward.',
+  },
+  5: {
+    codename: 'eager',
+    promptFragment:
+      'Lean in. Volunteer thoughts, explore tangents, and keep the conversation moving — speak unless you truly have nothing to add.',
+  },
+}

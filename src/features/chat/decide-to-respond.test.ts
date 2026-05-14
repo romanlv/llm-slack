@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { silenceSentinel } from '@/features/chat/defaults'
+import { chattinessLevels, silenceSentinel } from '@/features/chat/defaults'
 import {
   buildDecideSystemPrompt,
   parseAgentResponse,
@@ -84,6 +84,7 @@ describe('buildDecideSystemPrompt', () => {
       channelTitle: 'q2-launch',
       participants: [{ displayName: 'Strategist' }, { displayName: 'Critic' }],
       agentSystemPrompt: 'You are the Critic.',
+      chattiness: 3,
       allowAgentThreading: false,
       isInsideThread: false,
     })
@@ -94,11 +95,38 @@ describe('buildDecideSystemPrompt', () => {
     expect(text).toContain('You are the Critic.')
   })
 
+  it('injects the chattiness fragment matching the requested level', () => {
+    for (const level of [1, 2, 3, 4, 5] as const) {
+      const text = buildDecideSystemPrompt({
+        channelTitle: 'c',
+        participants: [],
+        agentSystemPrompt: '',
+        chattiness: level,
+        allowAgentThreading: false,
+        isInsideThread: false,
+      })
+      expect(text).toContain(chattinessLevels[level].promptFragment)
+    }
+  })
+
+  it('frames the baseline as silence-first regardless of level', () => {
+    const text = buildDecideSystemPrompt({
+      channelTitle: 'c',
+      participants: [],
+      agentSystemPrompt: '',
+      chattiness: 5,
+      allowAgentThreading: false,
+      isInsideThread: false,
+    })
+    expect(text).toMatch(/default is silence/i)
+  })
+
   it('includes the threading instruction only when allowed and not already in a thread', () => {
     const withThreading = buildDecideSystemPrompt({
       channelTitle: 'c',
       participants: [],
       agentSystemPrompt: '',
+      chattiness: 3,
       allowAgentThreading: true,
       isInsideThread: false,
     })
@@ -108,6 +136,7 @@ describe('buildDecideSystemPrompt', () => {
       channelTitle: 'c',
       participants: [],
       agentSystemPrompt: '',
+      chattiness: 3,
       allowAgentThreading: true,
       isInsideThread: true,
     })
@@ -117,6 +146,7 @@ describe('buildDecideSystemPrompt', () => {
       channelTitle: 'c',
       participants: [],
       agentSystemPrompt: '',
+      chattiness: 3,
       allowAgentThreading: false,
       isInsideThread: false,
     })

@@ -1,4 +1,5 @@
-import { silenceSentinel } from './defaults'
+import { chattinessLevels, silenceSentinel } from './defaults'
+import type { ChattinessLevel } from './domain'
 
 export interface DecideToRespondResult {
   respond: boolean
@@ -66,24 +67,34 @@ export interface DecideSystemPromptInput {
   channelTitle: string
   participants: Array<{ displayName: string }>
   agentSystemPrompt: string
+  chattiness: ChattinessLevel
   allowAgentThreading: boolean
   isInsideThread: boolean
 }
 
 // The {role:'system'} prefix the orchestrator prepends to every per-agent
-// transport. Names the channel, the participant roster, and the silence
-// convention. Includes the threading instruction only when the agent
-// could meaningfully choose `respondIn: 'thread'` (R13a v0: threading
-// works one-way from main).
+// transport. Names the channel, the participant roster, the silence
+// convention, and the agent's chattiness-driven participation framing.
+// Includes the threading instruction only when the agent could
+// meaningfully choose `respondIn: 'thread'` (R13a v0: threading works
+// one-way from main).
+//
+// Silence-first framing is deliberate: LLMs default to "yes, I can help"
+// once they emit a content token, so the baseline asks them to skip first
+// and only respond when their chattiness-level fragment greenlights it.
 export function buildDecideSystemPrompt(input: DecideSystemPromptInput): string {
   const roster = input.participants.map((p) => `- ${p.displayName}`).join('\n')
+  const fragment = chattinessLevels[input.chattiness].promptFragment
   const lines = [
     input.agentSystemPrompt.trim(),
     input.agentSystemPrompt.trim() ? '' : undefined,
-    `You are participating in the channel "${input.channelTitle}" with these agents:`,
+    `You are one of several participants in the channel "${input.channelTitle}". You are reading the conversation alongside:`,
     roster,
     '',
-    `If you do not have something useful to add, respond with exactly "${silenceSentinel}" — your silence is recorded but no message will be posted. Do not return an empty message.`,
+    'In a group chat, most messages do not need your reply. The default is silence; speak only when your contribution genuinely improves the conversation.',
+    fragment,
+    '',
+    `When you decide not to speak, respond with exactly "${silenceSentinel}" and nothing else — your silence is recorded but no message is posted. Do not return an empty message; do not narrate that you are staying quiet.`,
   ].filter((line): line is string => line !== undefined)
 
   if (input.allowAgentThreading && !input.isInsideThread) {

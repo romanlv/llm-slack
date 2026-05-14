@@ -1,5 +1,6 @@
 import { db } from '@/features/chat/database'
-import type { Agent } from '@/features/chat/domain'
+import { agentDefaults } from '@/features/chat/defaults'
+import type { Agent, ChattinessLevel } from '@/features/chat/domain'
 import type { ModelRef } from '@/features/providers/model-ref'
 
 export interface CreateAgentInput {
@@ -10,6 +11,7 @@ export interface CreateAgentInput {
   username?: string
   model: ModelRef
   systemPrompt?: string
+  chattiness?: ChattinessLevel
 }
 
 export interface UpdateAgentInput {
@@ -17,6 +19,15 @@ export interface UpdateAgentInput {
   username?: string
   model?: ModelRef
   systemPrompt?: string
+  chattiness?: ChattinessLevel
+}
+
+function normalizeChattiness(value: unknown): ChattinessLevel {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return agentDefaults.chattiness
+  }
+  const clamped = Math.min(5, Math.max(1, Math.round(value)))
+  return clamped as ChattinessLevel
 }
 
 export class AgentValidationError extends Error {
@@ -96,6 +107,10 @@ export async function createAgent(input: CreateAgentInput): Promise<Agent> {
       username,
       model: input.model,
       systemPrompt: input.systemPrompt ?? '',
+      chattiness:
+        input.chattiness !== undefined
+          ? normalizeChattiness(input.chattiness)
+          : agentDefaults.chattiness,
       createdAt: now,
       updatedAt: now,
     }
@@ -149,6 +164,9 @@ export async function updateAgent(id: string, updates: UpdateAgentInput): Promis
     }
     if (updates.model !== undefined) patch.model = updates.model
     if (updates.systemPrompt !== undefined) patch.systemPrompt = updates.systemPrompt
+    if (updates.chattiness !== undefined) {
+      patch.chattiness = normalizeChattiness(updates.chattiness)
+    }
     await db.agents.update(id, patch)
     const next = await db.agents.get(id)
     if (!next) {
