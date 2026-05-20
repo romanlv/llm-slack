@@ -178,15 +178,98 @@ function authorLabel(message: ChatMessage, userName: string) {
   return userName
 }
 
-function latestProviderUsage(messages: ChatMessage[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]
-    if (message.role === 'assistant' && message.providerUsage) {
-      return message.providerUsage
+// Per-participant stats for the context meter. In a 1:1 (DM or model-DM)
+// there's a single entry; in a channel every agent that has spoken gets its
+// own entry so the meter can surface the agent closest to its limit and the
+// total cost across all participants.
+interface MeterEntry {
+  key: string
+  displayName: string
+  agentId?: string
+  usage: ProviderUsage
+  totalCostUsd: number
+}
+
+function buildMeterEntries(
+  messages: ChatMessage[],
+  availableModels?: EffectiveModel[],
+): MeterEntry[] {
+  const byKey = new Map<string, { entry: MeterEntry; latestCreatedAt: number }>()
+
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue
+    if (!message.providerUsage) continue
+    // Group by agentId (channel/agent-DM) or by model identity (model-DM).
+    const key =
+      message.agentId ??
+      (message.model
+        ? `model:${message.model.providerKind}:${message.model.providerModelId}`
+        : 'unknown')
+    const enriched = enrichUsageWithCatalog(
+      message.providerUsage,
+      message.model,
+      availableModels,
+    )
+    const cost = message.providerUsage.costCredits ?? 0
+    const existing = byKey.get(key)
+    if (existing) {
+      existing.entry.totalCostUsd += cost
+      if (message.createdAt >= existing.latestCreatedAt) {
+        // Take the latest snapshot for usage AND displayName so an agent that
+        // was renamed or had its model swapped surfaces with current identity,
+        // not its first-message snapshot from earlier in the conversation.
+        existing.entry.usage = enriched
+        existing.entry.displayName = assistantDisplayName(message)
+        existing.latestCreatedAt = message.createdAt
+      }
+    } else {
+      byKey.set(key, {
+        entry: {
+          key,
+          displayName: assistantDisplayName(message),
+          agentId: message.agentId ?? undefined,
+          usage: enriched,
+          totalCostUsd: cost,
+        },
+        latestCreatedAt: message.createdAt,
+      })
     }
   }
 
-  return undefined
+  return [...byKey.values()]
+    .sort((a, b) => b.latestCreatedAt - a.latestCreatedAt)
+    .map((wrapped) => wrapped.entry)
+}
+
+function buildMeterEntryLookup(entries: MeterEntry[]) {
+  const byAgentId = new Map<string, MeterEntry>()
+  for (const entry of entries) {
+    if (entry.agentId) byAgentId.set(entry.agentId, entry)
+  }
+  return (agentId?: string | null): MeterEntry | undefined =>
+    agentId ? byAgentId.get(agentId) : undefined
+}
+
+function assistantDisplayName(message: ChatMessage): string {
+  if (message.agentSnapshot?.displayName) return message.agentSnapshot.displayName
+  if (message.model?.providerModelId) return message.model.providerModelId
+  return 'assistant'
+}
+
+function enrichUsageWithCatalog(
+  usage: ProviderUsage,
+  model: ChatMessage['model'],
+  availableModels?: EffectiveModel[],
+): ProviderUsage {
+  if (typeof usage.contextWindowTokens === 'number') return usage
+  if (!model || !availableModels) return usage
+  const match = availableModels.find(
+    (entry) =>
+      entry.providerKind === model.providerKind &&
+      entry.providerModelId === model.providerModelId,
+  )
+  if (typeof match?.contextLength !== 'number') return usage
+  return { ...usage, contextWindowTokens: match.contextLength }
 }
 
 function tokenCount(usage?: ProviderUsage) {
@@ -216,6 +299,17 @@ function formatTokenCount(tokens?: number) {
   }
 
   return String(tokens)
+}
+
+// OpenRouter reports usage.cost in dollars (their credits map 1:1 to USD).
+// Render with sig-fig-aware precision so a 4-cent call doesn't show as
+// "0.0427389" and a sub-cent call doesn't claim more precision than matters.
+function formatCostUsd(usd: number) {
+  if (usd === 0) return '$0'
+  if (usd < 0.0001) return '<$0.0001'
+  if (usd < 0.01) return `$${usd.toFixed(5).replace(/0+$/, '').replace(/\.$/, '')}`
+  if (usd < 1) return `$${usd.toFixed(3)}`
+  return `$${usd.toFixed(2)}`
 }
 
 function MessageText({ content, streaming }: { content: string; streaming?: boolean }) {
@@ -454,6 +548,7 @@ function MessageBlock({
   isPinned,
   isSaved,
   message,
+  meterEntry,
   onOpenThread,
   onSelect,
   onTogglePin,
@@ -466,6 +561,7 @@ function MessageBlock({
   isPinned: boolean
   isSaved: boolean
   message: ChatMessage
+  meterEntry?: MeterEntry
   onOpenThread: (messageId: string) => void
   onSelect?: () => void
   onTogglePin: (messageId: string) => Promise<void>
@@ -556,9 +652,17 @@ function MessageBlock({
         <div className="mb-0.5 flex flex-wrap items-baseline gap-2">
           <span className="text-body font-bold text-ink">{authorLabel(message, userName)}</span>
           {message.role === 'assistant' && message.model ? (
-            <span className="rounded border border-line bg-surface-muted px-1 py-px font-mono text-meta text-ink-muted">
-              {modelShortName(message.model)}
-            </span>
+            meterEntry ? (
+              <MeterHoverCard entry={meterEntry}>
+                <span className="rounded border border-line bg-surface-muted px-1 py-px font-mono text-meta text-ink-muted">
+                  {modelShortName(message.model)}
+                </span>
+              </MeterHoverCard>
+            ) : (
+              <span className="rounded border border-line bg-surface-muted px-1 py-px font-mono text-meta text-ink-muted">
+                {modelShortName(message.model)}
+              </span>
+            )
           ) : null}
           <span className="font-mono text-meta text-ink-dim">
             {formatTime(message.createdAt)}
@@ -718,53 +822,287 @@ function MessageBlock({
 }
 
 
-function ContextMeter({ compact, usage }: { compact?: boolean; usage?: ProviderUsage }) {
-  const usedTokens = tokenCount(usage)
-  const remainingTokens =
-    usage?.remainingTokens ??
-    (typeof usage?.contextWindowTokens === 'number' && typeof usedTokens === 'number'
-      ? Math.max(usage.contextWindowTokens - usedTokens, 0)
-      : undefined)
-  const percentUsed =
-    typeof usage?.contextWindowTokens === 'number' && typeof usedTokens === 'number'
-      ? Math.min(Math.round((usedTokens / usage.contextWindowTokens) * 100), 100)
-      : undefined
-  const circleProgress = percentUsed ?? 0
-  const primary =
-    typeof percentUsed === 'number'
-      ? `${percentUsed}%`
-      : usage
-        ? `${formatTokenCount(usedTokens)} used`
-        : 'usage'
-  const inputOutputLabel =
-    typeof usage?.promptTokens === 'number' || typeof usage?.completionTokens === 'number'
-      ? `${formatTokenCount(usage.promptTokens)} in · ${formatTokenCount(usage.completionTokens)} out`
-      : usage?.provider
-  const secondary =
-    typeof remainingTokens === 'number'
-      ? `${formatTokenCount(remainingTokens)} left`
-      : compact && usage
-        ? usage.provider
-        : inputOutputLabel || 'after reply'
+interface ComputedMeterStats {
+  usedTokens?: number
+  windowTokens?: number
+  remainingTokens?: number
+  percentLeft?: number
+  percentUsed?: number
+}
 
+function computeMeterStats(usage: ProviderUsage): ComputedMeterStats {
+  const usedTokens = tokenCount(usage)
+  const windowTokens = usage.contextWindowTokens
+  const remainingTokens =
+    usage.remainingTokens ??
+    (typeof windowTokens === 'number' && typeof usedTokens === 'number'
+      ? Math.max(windowTokens - usedTokens, 0)
+      : undefined)
+  // Honest rounding: only show 100% when nothing has been used, and only
+  // show 0% when the window is fully spent. Anything in between clamps to
+  // [1, 99] so a single token can't read as "empty" or "full".
+  const percentLeft =
+    typeof windowTokens === 'number' &&
+    typeof usedTokens === 'number' &&
+    windowTokens > 0
+      ? usedTokens <= 0
+        ? 100
+        : usedTokens >= windowTokens
+          ? 0
+          : Math.min(99, Math.max(1, Math.round(((windowTokens - usedTokens) / windowTokens) * 100)))
+      : undefined
+  return {
+    usedTokens,
+    windowTokens,
+    remainingTokens,
+    percentLeft,
+    percentUsed: typeof percentLeft === 'number' ? 100 - percentLeft : undefined,
+  }
+}
+
+function detailRowsForEntry(entry: MeterEntry): Array<{ label: string; value: string }> {
+  const stats = computeMeterStats(entry.usage)
+  const usage = entry.usage
+  return [
+    typeof stats.percentLeft === 'number'
+      ? { label: 'Context', value: `${stats.percentLeft}% left · ${stats.percentUsed}% used` }
+      : null,
+    typeof stats.remainingTokens === 'number' && typeof stats.windowTokens === 'number'
+      ? {
+          label: 'Window',
+          value: `${formatTokenCount(stats.remainingTokens)} of ${formatTokenCount(stats.windowTokens)} left`,
+        }
+      : typeof stats.remainingTokens === 'number'
+        ? { label: 'Remaining', value: formatTokenCount(stats.remainingTokens) }
+        : null,
+    typeof usage.promptTokens === 'number'
+      ? { label: 'Input', value: `${formatTokenCount(usage.promptTokens)} tokens` }
+      : null,
+    typeof usage.completionTokens === 'number'
+      ? { label: 'Output', value: `${formatTokenCount(usage.completionTokens)} tokens` }
+      : null,
+    typeof usage.totalTokens === 'number'
+      ? { label: 'Total', value: `${formatTokenCount(usage.totalTokens)} tokens` }
+      : null,
+    typeof usage.reasoningTokens === 'number' && usage.reasoningTokens > 0
+      ? { label: 'Reasoning', value: `${formatTokenCount(usage.reasoningTokens)} tokens` }
+      : null,
+    typeof usage.cachedTokens === 'number' && usage.cachedTokens > 0
+      ? { label: 'Cached', value: `${formatTokenCount(usage.cachedTokens)} tokens` }
+      : null,
+    entry.totalCostUsd > 0
+      ? { label: 'Cost (so far)', value: formatCostUsd(entry.totalCostUsd) }
+      : typeof usage.costCredits === 'number'
+        ? { label: 'Cost', value: formatCostUsd(usage.costCredits) }
+        : null,
+    usage.provider ? { label: 'Provider', value: usage.provider } : null,
+  ].filter((row): row is { label: string; value: string } => row !== null)
+}
+
+// Reusable hover popover anchored to a trigger element. Uses fixed positioning
+// so it escapes composer's overflow-hidden ancestor; coords are recomputed on
+// each open from the trigger's bounding box.
+function useHoverAnchor() {
+  const triggerRef = useRef<HTMLElement | null>(null)
+  const [position, setPosition] = useState<{ left: number; bottom: number } | null>(null)
+  const open = () => {
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setPosition({ left: rect.left, bottom: window.innerHeight - rect.top + 6 })
+  }
+  const close = () => setPosition(null)
+  return { triggerRef, position, open, close }
+}
+
+function HoverPopover({
+  position,
+  children,
+}: {
+  position: { left: number; bottom: number }
+  children: ReactNode
+}) {
   return (
     <div
-      className="inline-flex h-[22px] items-center gap-1.5 rounded-xs border border-line bg-surface-muted px-1.5 font-mono text-meta text-ink-muted"
-      title={usage ? inputOutputLabel : 'Provider token usage appears after a completed reply.'}
+      role="tooltip"
+      className="pointer-events-none fixed z-50 w-max min-w-[14rem] max-w-sm rounded-xs border border-line-strong bg-surface px-2 py-1.5 font-mono text-meta text-ink shadow-[0_4px_12px_rgba(0,0,0,0.12)]"
+      style={{ left: position.left, bottom: position.bottom }}
     >
-      <span
-        className="relative size-3 rounded-full border border-line"
-        style={{
-          background:
-            usage && typeof percentUsed === 'number'
-              ? `conic-gradient(var(--send) ${circleProgress}%, color-mix(in srgb, var(--ink) 8%, transparent) 0)`
-              : undefined,
-        }}
-      />
-      <strong className="text-ink">{primary}</strong>
-      <span className="text-ink-dim">·</span>
-      <span>{secondary}</span>
+      {children}
     </div>
+  )
+}
+
+function EntryDetailList({ entry }: { entry: MeterEntry }) {
+  return (
+    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+      {detailRowsForEntry(entry).map((row) => (
+        <div key={row.label} className="contents">
+          <dt className="text-ink-dim">{row.label}</dt>
+          <dd className="text-right">{row.value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+function ContextMeter({ compact, entries = [] }: { compact?: boolean; entries?: MeterEntry[] }) {
+  const { triggerRef, position, open, close } = useHoverAnchor()
+
+  const hasEntries = entries.length > 0
+  // For the chip stat: in a 1:1 conversation use the sole entry; in a channel
+  // surface the agent closest to its limit (lowest %-left) so the meter warns
+  // about the bottleneck rather than averaging it away.
+  const entryStats = entries.map((entry) => ({ entry, stats: computeMeterStats(entry.usage) }))
+  const pressured = entryStats.reduce<typeof entryStats[number] | undefined>((worst, current) => {
+    if (typeof current.stats.percentLeft !== 'number') return worst
+    if (!worst || typeof worst.stats.percentLeft !== 'number') return current
+    return current.stats.percentLeft < worst.stats.percentLeft ? current : worst
+  }, undefined)
+  const headline = pressured ?? entryStats[0]
+  const percentLeft = headline?.stats.percentLeft
+  const percentUsed = headline?.stats.percentUsed
+  const usedTokens = headline?.stats.usedTokens
+  const remainingTokens = headline?.stats.remainingTokens
+  const windowTokens = headline?.stats.windowTokens
+  const circleProgress = percentUsed ?? 0
+  const totalCostUsd = entries.reduce((sum, entry) => sum + entry.totalCostUsd, 0)
+  const isMulti = entries.length > 1
+
+  const primary =
+    typeof percentLeft === 'number'
+      ? `${percentLeft}% left`
+      : hasEntries
+        ? `${formatTokenCount(usedTokens)} used`
+        : 'context'
+  const inputOutputLabel = headline
+    ? typeof headline.entry.usage.promptTokens === 'number' ||
+      typeof headline.entry.usage.completionTokens === 'number'
+      ? `${formatTokenCount(headline.entry.usage.promptTokens)} in · ${formatTokenCount(headline.entry.usage.completionTokens)} out`
+      : headline.entry.usage.provider
+    : undefined
+  const scaleLabel =
+    typeof remainingTokens === 'number' && typeof windowTokens === 'number'
+      ? `${formatTokenCount(remainingTokens)} / ${formatTokenCount(windowTokens)}`
+      : typeof remainingTokens === 'number'
+        ? `${formatTokenCount(remainingTokens)} left`
+        : undefined
+  // Channel chip stays quiet: just the bottleneck % is shown inline. Per-agent
+  // depth (tokens, cost, provider) lives on each agent's name hover.
+  const secondary = isMulti
+    ? null
+    : (scaleLabel ?? (compact && hasEntries ? headline?.entry.usage.provider : inputOutputLabel || 'after reply'))
+
+  return (
+    <>
+      <div
+        ref={(node) => {
+          triggerRef.current = node
+        }}
+        className="inline-flex h-[22px] items-center gap-1.5 rounded-xs border border-line bg-surface-muted px-1.5 font-mono text-meta text-ink-muted"
+        onMouseEnter={open}
+        onMouseLeave={close}
+        onFocus={open}
+        onBlur={close}
+        tabIndex={0}
+      >
+        <span
+          className="relative size-3 rounded-full border border-line"
+          style={{
+            background:
+              hasEntries && typeof percentUsed === 'number'
+                ? `conic-gradient(var(--send) ${circleProgress}%, color-mix(in srgb, var(--ink) 8%, transparent) 0)`
+                : undefined,
+          }}
+        />
+        <strong className="text-ink">{primary}</strong>
+        {secondary ? (
+          <>
+            <span className="text-ink-dim">·</span>
+            <span>{secondary}</span>
+          </>
+        ) : null}
+      </div>
+      {position ? (
+        <HoverPopover position={position}>
+          {!hasEntries ? (
+            <p className="text-ink-dim">Provider token usage appears after a completed reply.</p>
+          ) : isMulti ? (
+            <div className="grid gap-1">
+              <p className="text-ink-dim">Hover a model chip for tokens &amp; cost.</p>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+                {entryStats.map(({ entry, stats }) => (
+                  <div key={entry.key} className="contents">
+                    <dt className="truncate text-ink">{entry.displayName}</dt>
+                    <dd className="text-right text-ink-dim">
+                      {typeof stats.percentLeft === 'number'
+                        ? `${stats.percentLeft}% left`
+                        : 'no window'}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              {totalCostUsd > 0 ? (
+                <div className="flex items-baseline justify-between gap-3 border-t border-line pt-1 text-ink">
+                  <span className="text-ink-dim">Total cost</span>
+                  <span className="font-semibold">{formatCostUsd(totalCostUsd)}</span>
+                </div>
+              ) : null}
+            </div>
+          ) : headline ? (
+            <EntryDetailList entry={headline.entry} />
+          ) : null}
+        </HoverPopover>
+      ) : null}
+    </>
+  )
+}
+
+// Hover card around an assistant message's model chip. The model is the thing
+// whose context window and cost the meter describes, so attaching there reads
+// more naturally than putting it on the agent's display name.
+function MeterHoverCard({
+  children,
+  entry,
+}: {
+  children: ReactNode
+  entry?: MeterEntry
+}) {
+  const { triggerRef, position, open, close } = useHoverAnchor()
+  if (!entry) {
+    return <>{children}</>
+  }
+  const stats = computeMeterStats(entry.usage)
+  return (
+    <>
+      <span
+        ref={(node) => {
+          triggerRef.current = node
+        }}
+        className="cursor-help"
+        onMouseEnter={open}
+        onMouseLeave={close}
+        onFocus={open}
+        onBlur={close}
+        tabIndex={0}
+      >
+        {children}
+      </span>
+      {position ? (
+        <HoverPopover position={position}>
+          <div className="grid gap-1">
+            <div className="flex items-baseline justify-between gap-3 text-ink">
+              <span className="truncate font-semibold">{entry.displayName}</span>
+              <span className="shrink-0 text-ink-dim">
+                {typeof stats.percentLeft === 'number'
+                  ? `${stats.percentLeft}% left`
+                  : 'no window'}
+              </span>
+            </div>
+            <EntryDetailList entry={entry} />
+          </div>
+        </HoverPopover>
+      ) : null}
+    </>
   )
 }
 
@@ -785,7 +1123,7 @@ function ConversationComposer({
   placeholder,
   submitDisabled,
   tone,
-  usage,
+  meterEntries,
 }: {
   className?: string
   disabled?: boolean
@@ -795,7 +1133,7 @@ function ConversationComposer({
   placeholder: string
   submitDisabled?: boolean
   tone: ComposerTone
-  usage?: ProviderUsage
+  meterEntries?: MeterEntry[]
 }) {
   const cannotSubmit = disabled || submitDisabled
   const formRef = useRef<HTMLFormElement | null>(null)
@@ -902,6 +1240,8 @@ function ConversationComposer({
   const handleFormSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (cannotSubmit) return
+    const current = valueRef.current
+    if (!current.trim()) return
     // Cancel the pending debounce: we're about to send, so a stale write
     // racing against markParentDraftSent (which clears the draft) would
     // resurrect already-sent text in the row.
@@ -909,14 +1249,30 @@ function ConversationComposer({
       clearTimeout(timerRef.current)
       timerRef.current = null
     }
-    const current = valueRef.current
-    const succeeded = await onSubmit(current)
-    if (succeeded) {
-      // Upstream (markParentDraftSent / markThreadDraftSent) has already
-      // cleared the row; pin persistedRef so a future schedulePersist call
-      // doesn't write the now-stale empty over a freshly typed draft.
-      persistedRef.current = ''
-      setValue('')
+
+    const restoreSubmittedValue = () => {
+      if (valueRef.current !== '') return
+      valueRef.current = current
+      persistedRef.current = current
+      setValue(current)
+      persistRef.current(current)
+    }
+
+    // Clear immediately so the user can begin composing the next prompt while
+    // the turn streams. Submission is still single-flight; queueing is later.
+    valueRef.current = ''
+    persistedRef.current = ''
+    setMentionQuery(null)
+    setValue('')
+    persistRef.current('')
+
+    try {
+      const succeeded = await onSubmit(current)
+      if (!succeeded) {
+        restoreSubmittedValue()
+      }
+    } catch {
+      restoreSubmittedValue()
     }
   }
 
@@ -996,7 +1352,7 @@ function ConversationComposer({
           />
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-line px-1.5 py-1 pl-2">
-          <ContextMeter compact={tone === 'thread'} usage={usage} />
+          <ContextMeter compact={tone === 'thread'} entries={meterEntries} />
           {/* TODO: reply-in-thread composer mode toggle — see docs/tasks.md (planned)
           {tone === 'parent' ? (
             <button
@@ -1542,7 +1898,7 @@ function ThreadPane({
   thread,
   tone,
   userName,
-  usage,
+  meterEntries,
 }: {
   activeTurn?: Turn
   availableModels: EffectiveModel[]
@@ -1572,13 +1928,14 @@ function ThreadPane({
   thread: ConversationThread
   tone: ThreadPaneTone
   userName: string
-  usage?: ProviderUsage
+  meterEntries?: MeterEntry[]
 }) {
   const archived = Boolean(rootChat.archivedAt)
   // Active-turn banner is scoped per-conversation: only show this pane's
   // banner if the active turn is the one streaming into this thread.
   const turnInThisThread =
     activeTurn?.conversationType === 'thread' && activeTurn.conversationId === thread.id
+  const meterLookup = buildMeterEntryLookup(meterEntries ?? [])
 
   return (
     <div
@@ -1644,6 +2001,7 @@ function ThreadPane({
             isSaved={savedMessageIds.has(message.id)}
             key={message.id}
             message={message}
+            meterEntry={meterLookup(message.agentId)}
             onOpenThread={onOpenChildThread}
             onTogglePin={onTogglePin}
             onToggleSaved={onToggleSaved}
@@ -1661,14 +2019,14 @@ function ThreadPane({
           />
         ) : null}
         <ConversationComposer
-          disabled={sending || archived}
+          disabled={archived}
           initialValue={initialDraft}
           onPersist={onPersistDraft}
           onSubmit={onSubmit}
           placeholder="Continue this branch, or /branch to fork again..."
-          submitDisabled={!hasUsableProvider}
+          submitDisabled={!hasUsableProvider || sending || turnInThisThread}
           tone="thread"
-          usage={usage}
+          meterEntries={meterEntries}
         />
       </div>
     </div>
@@ -1797,7 +2155,6 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
   const parentPinnedScrollContentKey = parentPinnedMessages
     .map((pin) => `${pin.id}:${pin.message.id}:${pin.message.content.length}:${pin.message.status}`)
     .join('|')
-  const parentUsage = latestProviderUsage(parentMessages)
   const userName = settings?.userName ?? DEFAULT_USER_NAME
   const avatarDataUrl = settings?.avatarDataUrl
   const parentPinnedMessageIds = new Set(parentPinnedMessages.map((pin) => pin.messageId))
@@ -1817,6 +2174,8 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
     [],
     [] as EffectiveModel[],
   )
+  const parentMeterEntries = buildMeterEntries(parentMessages, availableModels)
+  const parentMeterLookup = buildMeterEntryLookup(parentMeterEntries)
   // A provider is "usable" when send-turn would accept it: either the
   // adapter doesn't require a key (Ollama-style local endpoints), or one is
   // saved on the connection. Otherwise we show the connect-a-provider
@@ -2174,6 +2533,7 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
                     isSaved={savedMessageIds.has(pin.message.id)}
                     key={pin.id}
                     message={pin.message}
+                    meterEntry={parentMeterLookup(pin.message.agentId)}
                     onOpenThread={(messageId) => void openThreadForMessage(messageId)}
                     onSelect={() => void openPinnedMessage(pin)}
                     onTogglePin={toggleParentPin}
@@ -2195,6 +2555,7 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
                   isSaved={savedMessageIds.has(message.id)}
                   key={message.id}
                   message={message}
+                  meterEntry={parentMeterLookup(message.agentId)}
                   onOpenThread={(messageId) => void openThreadForMessage(messageId)}
                   onTogglePin={toggleParentPin}
                   onToggleSaved={toggleParentSaved}
@@ -2218,18 +2579,23 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
               />
             ) : null}
             <ConversationComposer
-              disabled={
-                sendingParent ||
-                Boolean(parentChat.archivedAt)
-              }
+              disabled={Boolean(parentChat.archivedAt)}
               initialValue={parentChat.draft}
               key={parentChat.id}
               onPersist={(value) => void saveParentDraft(parentChat.id, value)}
               onSubmit={handleParentSubmit}
               placeholder="Ask anything, or /branch to fork this convo..."
-              submitDisabled={!hasUsableProvider}
+              submitDisabled={
+                !hasUsableProvider ||
+                sendingParent ||
+                Boolean(
+                  activeTurn &&
+                    activeTurn.conversationType === 'parent' &&
+                    activeTurn.conversationId === parentChat.id,
+                )
+              }
               tone="parent"
-              usage={parentUsage}
+              meterEntries={parentMeterEntries}
             />
           </div>
         </section>
@@ -2301,7 +2667,7 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
             showModelPicker={parentChat.kind === 'dm' && !parentChat.agentId}
             thread={mainView.thread}
             tone="main"
-            usage={latestProviderUsage(mainThreadMessages)}
+            meterEntries={buildMeterEntries(mainThreadMessages, availableModels)}
             userName={userName}
           />
         </section>
@@ -2341,7 +2707,7 @@ export function ParentChatWorkspace({ chatId, threadId }: ParentChatWorkspacePro
               showModelPicker={parentChat.kind === 'dm' && !parentChat.agentId}
               thread={sideView.thread}
               tone="side"
-              usage={latestProviderUsage(sideThreadMessages)}
+              meterEntries={buildMeterEntries(sideThreadMessages, availableModels)}
               userName={userName}
             />
           ) : (

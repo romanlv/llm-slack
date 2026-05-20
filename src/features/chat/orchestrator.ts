@@ -332,7 +332,7 @@ async function runOneAttempt(input: RunOneAttemptInput): Promise<RunOneAttemptRe
     assistantMessageId = assistant.id
     await db.providerRequestAttempts.update(attempt.id, { assistantMessageId: assistant.id })
 
-    await completeMessage(assistant.id, decision.content)
+    await completeMessage(assistant.id, decision.content, response.usage)
     await completeAttempt(attempt.id, {
       providerRequestId: response.id,
       usage: response.usage,

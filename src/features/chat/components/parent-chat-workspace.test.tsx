@@ -52,6 +52,16 @@ const TEST_MODEL_REF = {
   providerModelId: 'openai/gpt-4o-mini',
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve
+    reject = innerReject
+  })
+  return { promise, resolve, reject }
+}
+
 function parentChat(overrides: Partial<ParentChat> = {}): ParentChat {
   return {
     id: 'parent-1',
@@ -239,6 +249,32 @@ describe('ParentChatWorkspace', () => {
         expect(mockedSendParentChatTurn).toHaveBeenNthCalledWith(2, 'parent-1', 'second')
       })
       // Send rejected — the user shouldn't lose what they typed.
+      expect(textarea.value).toBe('second')
+    })
+
+    it('clears immediately and keeps the textarea editable while the response is pending', async () => {
+      const pendingSend = deferred<void>()
+      mockedSendParentChatTurn.mockReturnValueOnce(pendingSend.promise)
+      await db.parentChats.add(parentChat())
+
+      const textarea = await mountAndFindComposer()
+      await userEvent.type(textarea, 'first')
+      await submitByKeyboard(textarea)
+
+      await waitFor(() => {
+        expect(mockedSendParentChatTurn).toHaveBeenCalledWith('parent-1', 'first')
+      })
+      expect(textarea.value).toBe('')
+      expect(textarea).not.toBeDisabled()
+
+      await userEvent.type(textarea, 'second')
+      expect(textarea.value).toBe('second')
+      expect(screen.getByRole('button', { name: /send/i })).toBeDisabled()
+
+      pendingSend.resolve()
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /send/i })).not.toBeDisabled()
+      })
       expect(textarea.value).toBe('second')
     })
 

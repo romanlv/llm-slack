@@ -158,6 +158,15 @@ Same auditable artifacts everywhere: one `turns` row, N
 `providerRequestAttempts` rows (N=1 for DMs, 0..many for channels), a
 recorded `stopReason`.
 
+### Composer during an active turn
+
+Submitting a prompt clears the composer immediately after handoff, before the
+assistant or agents finish responding. The textarea remains editable during
+the active turn so the user can draft the next prompt, but submit stays blocked
+until the current turn closes. The typed draft is local/persisted draft state;
+it is not queued or sent automatically. Explicit message queueing is deferred
+in `docs/tasks.md`.
+
 ### Stop reasons (every closed turn carries one)
 
 - `complete` — DM finished, or every channel candidate had its say.

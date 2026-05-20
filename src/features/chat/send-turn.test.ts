@@ -272,6 +272,50 @@ describe('send turn lifecycle', () => {
     expect(attempts[0].errorCode).toBe('boom')
   })
 
+  it('does not let finalization wipe a parent draft typed during streaming', async () => {
+    const parentChat = await createParentChat({ title: 'draft race', model: MODEL_A })
+    await seedOpenRouterProvider()
+    mockedStreamChat.mockImplementationOnce(async () => {
+      await db.parentChats.update(parentChat.id, { draft: 'next prompt' })
+      return { content: 'ok', id: 'req' }
+    })
+
+    await sendParentChatTurn(parentChat.id, 'first prompt')
+
+    await expect(db.parentChats.get(parentChat.id)).resolves.toMatchObject({
+      draft: 'next prompt',
+    })
+  })
+
+  it('does not let finalization wipe a thread draft typed during streaming', async () => {
+    const parentChat = await createParentChat({ title: 'thread draft race', model: MODEL_A })
+    const rootMessageId = crypto.randomUUID()
+    await db.messages.add({
+      id: rootMessageId,
+      conversationType: 'parent',
+      conversationId: parentChat.id,
+      parentChatId: parentChat.id,
+      role: 'user',
+      content: 'root',
+      createdAt: Date.now(),
+      status: 'complete',
+      directReplyCount: 0,
+      model: parentChat.model ?? undefined,
+    })
+    const thread = await getOrCreateThreadForMessage(rootMessageId)
+    await seedOpenRouterProvider()
+    mockedStreamChat.mockImplementationOnce(async () => {
+      await db.threads.update(thread.id, { draft: 'next thread prompt' })
+      return { content: 'ok', id: 'req-thread' }
+    })
+
+    await sendThreadTurn(thread.id, 'first thread prompt')
+
+    await expect(db.threads.get(thread.id)).resolves.toMatchObject({
+      draft: 'next thread prompt',
+    })
+  })
+
   it('routes a send to openai-compatible with empty apiKey + baseUrl + metadata.modelId', async () => {
     mockedOpenaiCompatStream.mockResolvedValueOnce({ content: 'hello back', id: 'req-1' })
     const parentChat = await createParentChat({

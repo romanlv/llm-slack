@@ -862,7 +862,6 @@ export async function finalizeParentChatAfterSend(
   response: string,
 ) {
   await db.parentChats.update(parentChatId, {
-    draft: '',
     updatedAt: Date.now(),
   })
   await updateParentChatActivity(parentChatId, response || prompt, prompt)
@@ -875,7 +874,6 @@ export async function finalizeThreadAfterSend(
   response: string,
 ) {
   await db.threads.update(threadId, {
-    draft: '',
     updatedAt: Date.now(),
   })
   await updateParentChatActivity(parentChatId, response || prompt, prompt)

@@ -34,6 +34,7 @@
 - [ ] file attachments (composer paperclip, Files tab)
 - [ ] branch map / tree visualization (sidebar "map ↗", header GitFork)
 - [ ] reply-in-thread composer mode toggle
+- [ ] queue composer messages submitted while a turn is already responding
 - [ ] channel-level pins (distinct from per-message pins)
 - [ ] reactions to messages with emojis 
 - [ ] search
