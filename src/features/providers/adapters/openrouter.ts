@@ -13,14 +13,12 @@ import { composeSignal } from './stream-signal'
 // Curated short list. Long-tail OpenRouter models go through modelOverrides
 // via the "Add custom model" UI rather than fetched dynamically.
 const BUNDLED: CatalogEntry[] = [
-  { providerModelId: 'tencent/hy3-preview:free', name: 'Hy3 Preview (free)', contextLength: 256_000 },
+  { providerModelId: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash', contextLength: 128_000 },
   { providerModelId: 'moonshotai/kimi-k2.6', name: 'Kimi K2.6', contextLength: 200_000 },
   { providerModelId: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6', contextLength: 1_000_000 },
   { providerModelId: 'anthropic/claude-opus-4.7', name: 'Claude Opus 4.7', contextLength: 1_000_000 },
-  { providerModelId: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash', contextLength: 128_000 },
   { providerModelId: 'google/gemini-3-flash-preview', name: 'Gemini 3 Flash Preview', contextLength: 1_000_000 },
   { providerModelId: 'deepseek/deepseek-v3.2', name: 'DeepSeek V3.2', contextLength: 128_000 },
-  { providerModelId: 'tencent/hy3-preview', name: 'Hy3 Preview', contextLength: 256_000 },
   { providerModelId: 'deepseek/deepseek-v4-pro', name: 'DeepSeek V4 Pro', contextLength: 128_000 },
   { providerModelId: 'minimax/minimax-m2.7', name: 'MiniMax M2.7', contextLength: 1_000_000 },
 ]
